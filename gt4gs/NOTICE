@@ -1,0 +1,71 @@
+gt4-gs.exe (gt4recomp-gs)
+==========================
+
+This program is based on PCSX2 (https://pcsx2.net, https://github.com/PCSX2/pcsx2),
+the PlayStation 2 emulator. It is not affiliated with or endorsed by the PCSX2 project.
+
+PCSX2 copyright
+---------------
+Copyright (C) the PCSX2 Dev Team and contributors. The original copyright notices and author
+information are kept in each source file and in the git history of this repository. The
+upstream base is tag v2.8.2, commit fd9d310ccbb6b8b62c976da8886a3c8fd3a10ff3.
+
+License
+-------
+PCSX2 is distributed under the GNU General Public License version 3 or later (GPL-3.0-or-later).
+This repository and gt4-gs.exe are distributed under the same license. The full text is in
+COPYING.GPLv3.
+
+Our changes
+-----------
+- 2026-10-15: standalone repository created (not a GitHub fork relationship) from the full PCSX2
+  history at v2.8.2; branch gt4gs/main.
+- 2026-10-15: gt4gs/ documentation (README, BUILD, NOTICE).
+- 2026-10-15: .github/workflows/gt4gs-windows.yml, scripts/windows/package-gt4gs.ps1 and the trimmed
+  dependency script build-dependencies-gt4gs.bat (upstream's build-dependencies.bat without the Qt
+  block; Qt is not needed when ENABLE_QT_UI=OFF).
+- 2026-10-15: upstream workflows changed to workflow_dispatch only (no upstream file deleted).
+- Later changes will be listed here with dates, in the same form.
+
+GPLv3 section 5
+---------------
+Modified versions carry prominent notices stating that they were modified, and the date of the
+modification (listed above). The notices in each file are otherwise kept.
+
+Source
+------
+The corresponding source is the git tag of each release (gt4gs-v*) at
+https://github.com/moesuito/gt4recomp-gs. Each GitHub Release attaches a source archive of that tag
+(GPLv3 section 6(d)). SOURCE.txt in the zip names the exact commit.
+
+Bundled third-party components
+------------------------------
+The package contains the DLLs that the build links at runtime, copied from the dependency build
+(build-dependencies-gt4gs.bat). The exact list is in SOURCE.txt of each zip. Their licenses (from the
+upstream projects, pinned versions in the script) are:
+
+- SDL3 (3.4.12): zlib license
+- shaderc (2026.2), glslang, SPIRV-Headers, SPIRV-Tools: Apache-2.0 (with the LLVM exception where
+  applicable) and the upstream licenses of those projects
+- FFmpeg (8.1): the build uses --enable-gpl (for libx264) and libsvtav1, so the FFmpeg DLLs are
+  under GPL-2.0-or-later as a whole. This is compatible with GPL-3.0-or-later distribution.
+- x264 (static, in FFmpeg): GPL-2.0-or-later
+- SVT-AV1 (4.0.1): BSD-3-Clause-Clear plus the AOMedia patent license
+- Opus (1.6.1): BSD-3-Clause
+- libvpl (2.16.0), AMF headers (1.5.0), nv-codec-headers (13.0.19.0): MIT
+- zlib (1.3.2): zlib license
+- libpng (1.6.58, APNG patch): libpng license
+- libjpeg-turbo (3.2.0): BSD-3-Clause, IJG and zlib terms
+- libwebp (1.6.0): BSD-3-Clause
+- FreeType (2.14.3): FreeType License (FTL) or GPL-2.0-or-later
+- HarfBuzz (14.2.0): MIT
+- LZ4 (1.10.0): BSD-2-Clause
+- Zstandard (1.5.7): BSD-3-Clause or GPL-2.0-or-later (dual)
+- PlutoVG (1.3.2), PlutoSVG (0.0.7): MIT
+- rapidyaml (0.12.1): MIT
+- DirectX-Headers (1.619.1), Agility SDK (1.619.2): MIT (Microsoft)
+
+The license texts of the upstream projects are in their source archives. This list is a
+convenience summary, not legal advice; the license of each bundled file is the one of its project.
+
+No game code, game data, BIOS, keys or disc images are part of this repository or of its releases.

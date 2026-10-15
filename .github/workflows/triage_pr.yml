@@ -1,7 +1,8 @@
 # Runs steps to triage an incoming Pull Request, for example - applying labels.
 name: 🤔 Pull Request Triage
 
-on: pull_request_target
+on:
+  workflow_dispatch:
 
 jobs:
   triage:

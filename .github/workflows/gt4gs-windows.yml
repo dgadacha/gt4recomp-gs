@@ -1,0 +1,130 @@
+# GT4Recomp GS process (gt4-gs.exe) for Windows x64. See gt4gs/BUILD.md.
+# Build: pcsx2-gsrunner with ENABLE_QT_UI=OFF and ENABLE_GSRUNNER=ON, MSVC, Ninja.
+# Release: a tag gt4gs-v* publishes the zip, SHA256SUMS and a source archive.
+name: GT4GS Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "gt4gs-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: gt4-gs Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 240
+    env:
+      POWERSHELL_TELEMETRY_OPTOUT: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#gt4gs-v}"
+          else
+            VERSION="dev-${GITHUB_SHA:0:7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Cache dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: gt4gs-win64-deps-${{ hashFiles('.github/workflows/scripts/windows/build-dependencies-gt4gs.bat', '.github/workflows/scripts/common/shaderc-changes.patch') }}
+
+      - name: Build dependencies (no Qt)
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        shell: cmd
+        env:
+          DEBUG: 0
+          BUILD_FFMPEG: 1
+        run: .github\workflows\scripts\windows\build-dependencies-gt4gs.bat
+
+      - name: Tool versions
+        shell: cmd
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Configure gt4-gs
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[17,18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
+          call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+            -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=ON -DENABLE_TESTS=OFF ^
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON ^
+            "-DCMAKE_PREFIX_PATH=%cd%\deps" || exit /b 1
+
+      - name: Build pcsx2-gsrunner
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[17,18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
+          call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          cmake --build build --target pcsx2-gsrunner --config Release || exit /b 1
+
+      - name: Package gt4-gs
+        id: package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: .github\workflows\scripts\windows\package-gt4gs.ps1 -Version $env:VERSION -Build build -Deps deps -OutDir dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt4-gs-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/gt4gs-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (tag)
+        uses: actions/checkout@v4
+
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: gt4-gs-windows-x64
+          path: dist
+
+      - name: Source archive of the tag
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VER="${GITHUB_REF_NAME#gt4gs-v}"
+          mkdir -p dist
+          git archive --format=zip --prefix="gt4recomp-gs-${VER}/" -o "dist/gt4recomp-gs-${VER}-source.zip" HEAD
+          cd dist
+          sha256sum gt4-gs-*-windows-x64.zip gt4recomp-gs-*-source.zip > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - name: Create prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: |
+            dist/gt4-gs-*-windows-x64.zip
+            dist/SHA256SUMS
+            dist/gt4recomp-gs-*-source.zip
+          body: |
+            GT4Recomp GS process (gt4-gs.exe), built from PCSX2 v2.8.2 (GPL-3.0+) by the commit recorded in SOURCE.txt.
+            Verify with SHA256SUMS. See gt4gs/BUILD.md and gt4gs/NOTICE in the source archive.

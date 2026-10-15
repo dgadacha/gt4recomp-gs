@@ -1,9 +1,7 @@
 name: 🖥️ 📦 Dispatch Windows Deps Build
 
 on:
-  pull_request_target:
-    types: [closed]
-
+  workflow_dispatch:
 jobs:
   trigger:
     if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'requires-win-deps-build')

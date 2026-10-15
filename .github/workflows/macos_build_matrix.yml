@@ -1,13 +1,7 @@
 name: 🍎 MacOS Builds
 
 on:
-  push:
-    branches-ignore:
-      - "l10n_master"
-  pull_request:
-    branches:
-      - master
-
+  workflow_dispatch:
 jobs:
   build_macos_qt:
     name: "Defaults"

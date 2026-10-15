@@ -1,17 +1,7 @@
 name: 📝 Validate GameDB
 
 on:
-  push:
-    branches-ignore:
-      - "l10n_master"
-    paths:
-      - '**/GameIndex.yaml'
-  pull_request:
-    branches:
-      - master
-    paths:
-      - '**/GameIndex.yaml'
-
+  workflow_dispatch:
 jobs:
   lint:
     name: Lint and Validate GameDB

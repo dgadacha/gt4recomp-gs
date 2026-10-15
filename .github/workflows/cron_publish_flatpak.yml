@@ -1,21 +1,7 @@
 name: 📦 Publish Flathub Release
 
 on:
-  schedule:
-    - cron: "0 0 * * *" # Every day at 12am UTC.
-  workflow_dispatch: # As well as manually.
-    inputs:
-      stableBuild:
-        description: 'Build stable version'
-        required: false
-        type: boolean
-        default: false
-      publish:
-        description: 'Publish to Flathub'
-        required: false
-        type: boolean
-        default: true
-
+  workflow_dispatch:
 jobs:
 
 # check is disabled as the flathub api does not give us beta repository information

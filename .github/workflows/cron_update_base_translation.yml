@@ -1,10 +1,7 @@
 name: 🌎 Update Base Translation
 
 on:
-  schedule:
-    - cron: "0 0 * * *" # Every day at 12am UTC.
-  workflow_dispatch: # As well as manually.
-
+  workflow_dispatch:
 jobs:
   update:
     if: github.repository == 'PCSX2/pcsx2'
