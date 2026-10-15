@@ -19,7 +19,7 @@ From the repository root, in a `cmd` shell:
 
 ```
 .github\workflows\scripts\windows\build-dependencies-gt4gs.bat
-call "<VS 2022 install>\VC\Auxiliary\Build\vcvars64.bat"
+call "<Visual Studio install>\VC\Auxiliary\Build\vcvars64.bat"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
   -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=ON -DENABLE_TESTS=OFF ^
   -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON ^
