@@ -6,7 +6,7 @@ tag should produce the same file list; bit-identical output is a goal, recorded 
 ## Tool versions
 
 - Runner image: `windows-2025` (GitHub-hosted). The exact image version is in the job log of each run.
-- Visual Studio 2022 Build Tools (MSVC, `vcvars64.bat`), located with `vswhere -version "[17,18)"`.
+- Visual Studio Build Tools with the MSVC x64 tools (MSVC, `vcvars64.bat`), located with `vswhere -latest`. The runner's installed version is in the job log (the first run used VS 18, MSVC 2026, Enterprise).
 - CMake and Ninja from the runner image. The versions used are printed by the step "Tool versions".
 - Git for Windows (provides `bash.exe` and `patch.exe` used by the dependency script), 7-Zip.
 - Dependency versions are pinned inside `build-dependencies-gt4gs.bat` with SHA-256 checks for every archive.

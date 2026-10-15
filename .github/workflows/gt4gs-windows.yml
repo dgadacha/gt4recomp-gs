@@ -59,7 +59,7 @@ jobs:
       - name: Configure gt4-gs
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[17,18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTPATH=%%i"
           call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
             -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=ON -DENABLE_TESTS=OFF ^
@@ -69,7 +69,7 @@ jobs:
       - name: Build pcsx2-gsrunner
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[17,18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTPATH=%%i"
           call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake --build build --target pcsx2-gsrunner --config Release || exit /b 1
 
