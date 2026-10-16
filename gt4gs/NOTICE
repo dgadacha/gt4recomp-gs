@@ -34,6 +34,15 @@ Our changes
   pcsx2/CMakeLists.txt, CMakeLists.txt and cmake/BuildParameters.cmake (sources, hash check, ENABLE_GT4GS),
   the dependency script (vswhere -products *), the packaging script and the gt4gs-windows workflow (build
   pcsx2-gt4gs).
+- 2026-10-16 (branch gt4gs/window, tasks 037 and 038, release 0.3.0): pcsx2/GSStreamReplayer.cpp (GIF
+  tag scanner that captures BITBLTBUF/TRXPOS/TRXREG for unsynchronized readbacks, readback timing,
+  zero-size resize requests ignored, a counter of GIF records that start inside another path's packet),
+  pcsx2-gt4gs/ (data root and [Folders] from the config instead of the PCSX2 user folder, SPU2 Null
+  backend, [GT4GS] SpinUs, DeferSwapChainAcquire and test-only window stall options, input queues
+  detached from the game's window thread, a click on the picture brings the game window forward).
+  Modified PCSX2 files: pcsx2/GS/GS.h and pcsx2/GS/GS.cpp (swap chain acquire accounting and the deferred
+  acquire switch), pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp (acquire timing),
+  pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp (the acquire after present is skipped when deferred).
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5

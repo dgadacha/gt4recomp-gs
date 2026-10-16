@@ -89,6 +89,17 @@ void GSSetVSyncMode(GSVSyncMode mode, bool allow_present_throttle);
 
 GSRendererType GSGetCurrentRenderer();
 bool GSIsHardwareRenderer();
+
+// GT4Recomp fork (gt4-gs.exe, task 037): swap chain image acquire accounting and the deferred acquire option.
+// Vulkan acquires the next swap chain image right after each present; with FIFO presentation and two images that call
+// blocks the GS thread until the display releases an image, so a readback queued behind it waits for a display
+// refresh. With deferred acquire the image is acquired when the next frame is presented instead.
+void GSSetDeferredSwapChainAcquire(bool deferred);
+bool GSGetDeferredSwapChainAcquire();
+void GSAddSwapChainAcquireWait(u64 microseconds);
+u64 GSGetSwapChainAcquireWaitUs();
+u64 GSGetSwapChainAcquireCount();
+u64 GSGetSwapChainAcquireBlockedCount();
 std::string GetDefaultAdapter();
 bool GSWantsExclusiveFullscreen();
 std::optional<float> GSGetHostRefreshRate();

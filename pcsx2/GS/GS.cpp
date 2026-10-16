@@ -52,6 +52,7 @@
 
 #include "fmt/format.h"
 
+#include <atomic>
 #include <fstream>
 
 Pcsx2Config::GSOptions GSConfig;
@@ -67,6 +68,45 @@ bool GSIsHardwareRenderer()
 {
 	// Null gets flagged as hw.
 	return (GSCurrentRenderer != GSRendererType::SW);
+}
+
+// GT4Recomp fork (task 037): see GS.h.
+static std::atomic<bool> s_deferred_swap_chain_acquire{false};
+static std::atomic<u64> s_swap_chain_acquire_wait_us{0};
+static std::atomic<u64> s_swap_chain_acquire_count{0};
+static std::atomic<u64> s_swap_chain_acquire_blocked{0};
+
+void GSSetDeferredSwapChainAcquire(bool deferred)
+{
+	s_deferred_swap_chain_acquire.store(deferred, std::memory_order_relaxed);
+}
+
+bool GSGetDeferredSwapChainAcquire()
+{
+	return s_deferred_swap_chain_acquire.load(std::memory_order_relaxed);
+}
+
+void GSAddSwapChainAcquireWait(u64 microseconds)
+{
+	s_swap_chain_acquire_wait_us.fetch_add(microseconds, std::memory_order_relaxed);
+	s_swap_chain_acquire_count.fetch_add(1, std::memory_order_relaxed);
+	if (microseconds >= 1000)
+		s_swap_chain_acquire_blocked.fetch_add(1, std::memory_order_relaxed);
+}
+
+u64 GSGetSwapChainAcquireWaitUs()
+{
+	return s_swap_chain_acquire_wait_us.load(std::memory_order_relaxed);
+}
+
+u64 GSGetSwapChainAcquireCount()
+{
+	return s_swap_chain_acquire_count.load(std::memory_order_relaxed);
+}
+
+u64 GSGetSwapChainAcquireBlockedCount()
+{
+	return s_swap_chain_acquire_blocked.load(std::memory_order_relaxed);
 }
 
 std::string GetDefaultAdapter()

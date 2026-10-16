@@ -11,11 +11,16 @@
 // Live mode: no input, no audio, no memory cards; the serial (SCUS-97328 for GT4) comes from the handshake so the
 // GameDB GS fixes apply; blending accuracy defaults to High (the GameDB only recommends it). The GS presents on a
 // window of this process that becomes a WS_CHILD of the game's window on CONTROL attach_window; the window thread
-// only pumps messages, the window is transparent to the mouse and never takes focus.
+// only pumps messages and never takes focus. After SetParent the window thread detaches its input queue from the
+// game's window thread (cross-process SetParent attaches them), so a stalled GS window thread cannot hold up the
+// game's keyboard or mouse input; a click on the GS picture brings the game window to the foreground (task 038).
+// Folders: in the stream modes the data root is [GT4GS] DataRoot (default %LOCALAPPDATA%\GT4Recomp\gt4-gs), never the
+// PCSX2 user folder, and the [Folders] keys of the --config file (Cache, Textures, ...) are applied (task 037).
 
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <condition_variable>
 #include <mutex>
@@ -113,7 +118,11 @@ static std::string s_config_path;
 static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
-static constexpr const char* GT4GS_VERSION = "gt4gs 0.2.0-live (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 0.3.0 (PCSX2 v2.8.2)";
+static bool s_data_root_from_config = false;
+static u32 s_spin_us = 0; // [GT4GS] SpinUs: transport spin before sleeping (0: the transport default, 30 us)
+static u32 s_debug_stall_window_ms = 0; // [GT4GS] DebugStallWindowMs: test only, window thread stall after attach
+static u32 s_debug_stall_after_ms = 0; // [GT4GS] DebugStallAfterMs: delay from attach to that stall
 static s32 s_loop_count = 1;
 static std::optional<bool> s_use_window;
 static bool s_no_console = false;
@@ -652,6 +661,17 @@ bool GSRunner::ApplyGT4Config()
 			s_settings_interface.SetStringValue(section, key.c_str(), value.c_str());
 	}
 	s_live_surfaceless = ini.GetBoolValue("GT4GS", "Surfaceless", false);
+	s_spin_us = static_cast<u32>(std::clamp(ini.GetIntValue("GT4GS", "SpinUs", 0), 0, 2000));
+	// Live presentation: acquire the next swap chain image at the next present, not right after this one (task 037).
+	GSSetDeferredSwapChainAcquire(ini.GetBoolValue("GT4GS", "DeferSwapChainAcquire", s_stream_mode == StreamMode::Live));
+	s_debug_stall_window_ms = static_cast<u32>(std::clamp(ini.GetIntValue("GT4GS", "DebugStallWindowMs", 0), 0, 60000));
+	s_debug_stall_after_ms = static_cast<u32>(std::clamp(ini.GetIntValue("GT4GS", "DebugStallAfterMs", 0), 0, 600000));
+	const std::string data_root = ini.GetStringValue("GT4GS", "DataRoot", "");
+	if (!data_root.empty())
+	{
+		EmuFolders::DataRoot = Path::Canonicalize(data_root);
+		s_data_root_from_config = true;
+	}
 	// Headless checks: PNG frame dumps named <DumpDir>/live_frameNNNNN.png (frame = stream VSYNC count), every
 	// DumpEvery vsyncs. The same naming as GSRunner's -dumpdir, so live and offline frames compare directly.
 	const std::string dump_dir = ini.GetStringValue("GT4GS", "DumpDir", "");
@@ -667,6 +687,37 @@ bool GSRunner::ApplyGT4Config()
 		Console.WriteLnFmt("Frame dumps: {}_frameNNNNN.png every {} vsyncs", s_output_prefix, s_dump_every);
 	}
 	Console.WriteLnFmt("Loaded settings from {}{}", s_config_path, s_live_surfaceless ? " (surfaceless)" : "");
+	return true;
+}
+
+// Stream modes: a data root of our own (never the PCSX2 user folder) and the [Folders] keys from the config, applied
+// before the GS opens so the shader and pipeline caches are read from and written to the configured Cache folder.
+static bool ApplyStreamFolders()
+{
+	if (!s_data_root_from_config)
+	{
+		// No [GT4GS] DataRoot: %LOCALAPPDATA%\GT4Recomp\gt4-gs.
+		const char* local = std::getenv("LOCALAPPDATA");
+		if (!local || !*local)
+		{
+			Console.Error("LOCALAPPDATA is not set and the config has no [GT4GS] DataRoot.");
+			return false;
+		}
+		EmuFolders::DataRoot = Path::Combine(Path::Combine(local, "GT4Recomp"), "gt4-gs");
+	}
+	if (!FileSystem::DirectoryExists(EmuFolders::DataRoot.c_str()) &&
+		!FileSystem::CreateDirectoryPath(EmuFolders::DataRoot.c_str(), false))
+	{
+		Console.ErrorFmt("Cannot create the gt4-gs data folder {}.", EmuFolders::DataRoot);
+		return false;
+	}
+	CrashHandler::SetWriteDirectory(EmuFolders::DataRoot);
+	EmuFolders::LoadConfig(s_settings_interface);
+	EmuFolders::EnsureFoldersExist();
+	// Plain stderr: the PCSX2 console is not set up again until the VM starts.
+	std::fprintf(stderr, "gt4-gs: data root %s, cache %s, textures %s\n", EmuFolders::DataRoot.c_str(),
+		EmuFolders::Cache.c_str(), EmuFolders::Textures.c_str());
+	std::fflush(stderr);
 	return true;
 }
 
@@ -691,6 +742,8 @@ bool GSRunner::PrepareStream()
 		}
 		Console.WriteLnFmt("GS stream session {}: serial {}, frames in flight {}, protocol {}", s_ipc_name,
 			transport->Serial(), transport->FramesInFlight(), gt4gs::ProtocolVersionText());
+		if (s_spin_us)
+			transport->SetSpinUs(s_spin_us);
 		source = new LiveSource(std::move(transport));
 		hooks.attach = &GSRunner::AttachToGameWindow;
 		hooks.resize = &GSRunner::ResizeGameChildWindow;
@@ -1130,8 +1183,8 @@ void GSRunner::SettingsOverride()
 	s_settings_interface.SetBoolValue("InputSources", "SDL", false);
 	s_settings_interface.SetBoolValue("InputSources", "XInput", false);
 
-	// we don't need any sound output
-	s_settings_interface.SetStringValue("SPU2/Output", "OutputModule", "nullout");
+	// we don't need any sound output (PCSX2 v2.x key; the older OutputModule key is ignored and opened a WASAPI stream)
+	s_settings_interface.SetStringValue("SPU2/Output", "Backend", "Null");
 
 	// none of the bindings are going to resolve to anything
 	Pad::ClearPortBindings(s_settings_interface, 0);
@@ -1263,7 +1316,7 @@ int main(int argc, char* argv[])
 	if (s_stream_mode != StreamMode::None)
 	{
 		// GT4Recomp: the config file comes after the overrides (it sets the user's GS options), then the stream opens.
-		if (!GSRunner::ApplyGT4Config())
+		if (!GSRunner::ApplyGT4Config() || !ApplyStreamFolders())
 			return 2;
 		if (s_stream_mode == StreamMode::Live)
 			s_use_window = !s_live_surfaceless;
@@ -1469,6 +1522,9 @@ static constexpr UINT GT4GS_RESIZE_MSG = WM_APP + 0x102; // lParam = MAKELPARAM(
 static HANDLE s_attach_done = nullptr;
 static std::atomic<bool> s_attach_ok{false};
 
+static constexpr UINT_PTR GT4GS_STALL_TIMER = 0x4754;
+static bool s_input_detached = false;
+
 static void AttachOnWindowThread(HWND parent, int width, int height)
 {
 	bool ok = IsWindow(parent) != FALSE;
@@ -1479,8 +1535,14 @@ static void AttachOnWindowThread(HWND parent, int width, int height)
 		SetWindowLongPtrW(s_hwnd, GWL_STYLE, WS_CHILD | WS_CLIPSIBLINGS);
 		SetWindowLongPtrW(s_hwnd, GWL_EXSTYLE, WS_EX_NOACTIVATE | WS_EX_NOPARENTNOTIFY);
 		ok = SetParent(s_hwnd, parent) != nullptr || GetLastError() == ERROR_SUCCESS;
-		SetWindowPos(s_hwnd, HWND_TOP, 0, 0, width, height,
+		SetWindowPos(s_hwnd, HWND_TOP, 0, 0, std::max(width, 1), std::max(height, 1),
 			SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+		// SetParent across processes attaches the two threads' input queues; detach them so that this thread can never
+		// hold up the game's input (and the game's focus state is not shared with this thread).
+		const DWORD game_thread = GetWindowThreadProcessId(parent, nullptr);
+		s_input_detached = game_thread && AttachThreadInput(GetCurrentThreadId(), game_thread, FALSE) != FALSE;
+		if (s_debug_stall_window_ms)
+			SetTimer(s_hwnd, GT4GS_STALL_TIMER, std::max<u32>(s_debug_stall_after_ms, USER_TIMER_MINIMUM), nullptr);
 	}
 	s_attach_ok.store(ok);
 	SetEvent(s_attach_done);
@@ -1499,12 +1561,14 @@ bool GSRunner::AttachToGameWindow(u64 parent_window, u32 width, u32 height)
 		Console.Error("gt4-gs: the window thread did not attach within 5 s");
 		return false;
 	}
-	Console.WriteLnFmt("gt4-gs: window attached to 0x{:X} ({}x{}): {}", parent_window, width, height, s_attach_ok.load() ? "ok" : "failed");
+	Console.WriteLnFmt("gt4-gs: window attached to 0x{:X} ({}x{}): {}; input queues {}", parent_window, width, height,
+		s_attach_ok.load() ? "ok" : "failed", s_input_detached ? "detached" : "still attached");
 	return s_attach_ok.load();
 }
 
 void GSRunner::ResizeGameChildWindow(u32 width, u32 height)
 {
+	// A zero size (the game window minimized) is ignored by the replayer before it gets here.
 	if (s_hwnd)
 		PostMessageW(s_hwnd, GT4GS_RESIZE_MSG, 0, MAKELPARAM(width, height));
 }
@@ -1521,10 +1585,29 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			case GT4GS_RESIZE_MSG:
 				SetWindowPos(hwnd, nullptr, 0, 0, LOWORD(lParam), HIWORD(lParam), SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
 				return 0;
+			case WM_TIMER:
+				if (wParam == GT4GS_STALL_TIMER)
+				{
+					// Test only ([GT4GS] DebugStallWindowMs): the window thread stops pumping, like a hung GS window
+					// thread. The game window must stay responsive (tools/gs_live_check --stall).
+					KillTimer(hwnd, GT4GS_STALL_TIMER);
+					Console.WriteLnFmt("gt4-gs: debug stall of the window thread for {} ms", s_debug_stall_window_ms);
+					Sleep(s_debug_stall_window_ms);
+					Console.WriteLn("gt4-gs: debug stall ended");
+					return 0;
+				}
+				break;
 			case WM_NCHITTEST:
-				return HTTRANSPARENT; // mouse input goes to the game window underneath
+				return HTTRANSPARENT; // same-thread windows only; the parent is in another process
 			case WM_MOUSEACTIVATE:
+			{
+				// A click on the picture: bring the game window forward (this process received the click, so it may),
+				// but never activate this child.
+				const HWND root = GetAncestor(hwnd, GA_ROOT);
+				if (root && root != hwnd && GetForegroundWindow() != root)
+					SetForegroundWindow(root);
 				return MA_NOACTIVATE;
+			}
 			case WM_SETFOCUS:
 				if (HWND parent = GetParent(hwnd))
 					SetFocus(parent); // never keep the keyboard focus

@@ -59,6 +59,12 @@ Used for iteration on `gt4gs/live`; the CI recipe above stays the reference for 
 - Package with `package-gt4gs.ps1` as above. Local and CI packages are not bit-identical (different MSVC and
   LTO settings); the GT4Recomp launcher pins the exact package it uses.
 
+## Local build (task 037/038, release 0.3.0)
+
+Same recipe as task 036 into a fresh build directory (GT4Recomp `private/slice194-gt4gs-build`, dependencies of
+`private/slice193-gt4gs-deps` reused): cold build 751 steps in about 6 minutes, incremental rebuilds after the
+GS stream changes 3 to 10 steps. Package `gt4-gs-0.3.0-windows-x64.zip` with `package-gt4gs.ps1 -Version 0.3.0`.
+
 ## Renderers in this build
 
 - Vulkan, D3D11 and D3D12 are compiled in on Windows. OpenGL is compiled in too (`USE_OPENGL` default ON)

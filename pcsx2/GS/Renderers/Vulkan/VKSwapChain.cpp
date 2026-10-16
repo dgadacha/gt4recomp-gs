@@ -5,12 +5,14 @@
 #include "GS/Renderers/Vulkan/VKBuilders.h"
 #include "GS/Renderers/Vulkan/VKSwapChain.h"
 #include "VMManager.h"
+#include "GS/GS.h"
 
 #include "common/Assertions.h"
 #include "common/CocoaTools.h"
 #include "common/Console.h"
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cmath>
 
@@ -551,8 +553,12 @@ VkResult VKSwapChain::AcquireNextImage()
 	// Use a different semaphore for each image.
 	m_current_semaphore = (m_current_semaphore + 1) % static_cast<u32>(m_semaphores.size());
 
+	// GT4Recomp fork (task 037): time every acquire (FIFO blocks here until the display releases an image).
+	const auto acquire_start = std::chrono::steady_clock::now();
 	const VkResult res = vkAcquireNextImageKHR(GSDeviceVK::GetInstance()->GetDevice(), m_swap_chain, UINT64_MAX,
 		m_semaphores[m_current_semaphore].available_semaphore, VK_NULL_HANDLE, &m_current_image);
+	GSAddSwapChainAcquireWait(static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::steady_clock::now() - acquire_start).count()));
 	m_image_acquire_result = res;
 	return res;
 }

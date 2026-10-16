@@ -14,7 +14,12 @@
 //              scanlines after posting the vsync, so the GS sees the field of the frame that just ended), then the
 //              vsync is posted to the GS thread, which presents. vsyncs_done is bumped on the GS thread after the
 //              vsync was processed.
-//   READ_FIFO  local-to-host read through MTGS::InitAndReadFIFO into the response area, then readback_done.
+//   READ_FIFO  local-to-host read through MTGS::InitAndReadFIFO into the response area, then readback_done. The GS
+//              hardware download mode ([EmuCore/GS] HWDownloadMode) decides how: Enabled (accurate, the default) waits for
+//              the GS thread and the GPU; Unsynchronized answers on this thread from the GS local memory as it is (no GS
+//              thread or GPU wait, may be stale); Disabled answers zeros. Unsynchronized needs the transfer registers
+//              (BITBLTBUF, TRXPOS, TRXREG), which the EE side of PCSX2 captures in Gif_HandlerAD; here a small GIF tag
+//              scanner per path captures them from the A+D writes of the stream (task 037).
 //   RESET      kind 1: GS hard reset (privileged block cleared); kind 2: GIF path parsers soft reset.
 //   CONTROL    shutdown, attach_window, resize, snapshot; reload_config is answered "unsupported" (TASK-039).
 //
@@ -35,6 +40,7 @@
 #include "R5900.h"
 #include "VMManager.h"
 #include "VUmicro.h"
+#include "Vif_Dma.h"
 
 #include "common/Console.h"
 #include "common/RedtapeWindows.h"
@@ -79,6 +85,8 @@ namespace
 	constexpr u32 kImr = 0x1010;
 	constexpr u32 kCsrFieldBit = 0x2000;
 	constexpr u32 kStatsEveryVsyncs = 500;
+	constexpr u32 kTransferRegisterFirst = 0x50; // BITBLTBUF
+	constexpr u32 kTransferRegisterLast = 0x52; // TRXREG
 
 	std::unique_ptr<GSStreamReplayer::Source> s_source;
 	GSStreamReplayer::WindowHooks s_hooks;
@@ -96,6 +104,133 @@ namespace
 	u8 s_gif_parts_path = 0;
 	std::vector<u8> s_readback_buffer;
 	std::vector<u32> s_snapshot_pixels;
+
+	// GIF tag scanner per path: follows PACKED/REGLIST/IMAGE tags across records and copies A+D writes to BITBLTBUF,
+	// TRXPOS and TRXREG (0x50-0x52) into vif1.transfer_registers, as PCSX2's Gif_HandlerAD does on the EE side. Only the
+	// unsynchronized readback mode reads these registers.
+	struct GifTransferRegisterScanner
+	{
+		u32 loops_left = 0; // NLOOP still to go for the current tag (0: the next qword is a tag)
+		u32 registers = 0; // NREG (1-16)
+		u32 register_index = 0; // next register descriptor in PACKED mode
+		u64 descriptors = 0; // REGS
+		u32 format = 0; // FLG: 0 PACKED, 1 REGLIST, 2/3 IMAGE
+		u64 words_left = 0; // REGLIST: 64-bit words still to go (padded to a qword at the end)
+
+		void Scan(const u8* data, u32 bytes)
+		{
+			for (u32 at = 0; at + 16 <= bytes; at += 16)
+			{
+				const u8* qword = data + at;
+				u64 low, high;
+				std::memcpy(&low, qword, 8);
+				std::memcpy(&high, qword + 8, 8);
+				if (loops_left == 0)
+				{
+					loops_left = static_cast<u32>(low & 0x7FFF);
+					format = static_cast<u32>((low >> 58) & 3);
+					registers = static_cast<u32>((low >> 60) & 0xF);
+					if (registers == 0)
+						registers = 16;
+					descriptors = high;
+					register_index = 0;
+					words_left = static_cast<u64>(loops_left) * registers;
+					continue;
+				}
+				if (format == 0)
+				{
+					const u32 descriptor = static_cast<u32>((descriptors >> (4 * register_index)) & 0xF);
+					if (descriptor == 0xE) // A+D: data in bits 0-63, register address in bits 64-71
+					{
+						const u32 address = static_cast<u32>(high & 0xFF);
+						if (address >= kTransferRegisterFirst && address <= kTransferRegisterLast)
+							vif1.transfer_registers[address - kTransferRegisterFirst] = low;
+					}
+					if (++register_index == registers)
+					{
+						register_index = 0;
+						--loops_left;
+					}
+				}
+				else if (format == 1)
+				{
+					// Two 64-bit words per qword; an odd total leaves the upper half of the last qword unused.
+					words_left = words_left > 2 ? words_left - 2 : 0;
+					if (words_left == 0)
+						loops_left = 0;
+				}
+				else
+				{
+					--loops_left; // IMAGE: NLOOP qwords of data
+				}
+			}
+		}
+	};
+	GifTransferRegisterScanner s_transfer_scanners[3];
+	// GIF records that started while another path was inside a GIF packet. The PCSX2 GS parses the packets of all paths
+	// with one tag state, so the stream is expected to deliver whole packets per record; non-zero means it did not.
+	u64 s_gif_interleaved = 0;
+
+	// Readback service times on the CPU thread (READ_FIFO taken from the ring until the reply is written), per
+	// periodic report and for the whole session.
+	struct ReadbackTimes
+	{
+		static constexpr int kBuckets = 8; // <0.25, <0.5, <1, <2, <4, <8, <16, >=16 ms
+		u64 count = 0;
+		u64 total_us = 0;
+		u64 max_us = 0;
+		u64 buckets[kBuckets] = {};
+
+		void Add(u64 us)
+		{
+			++count;
+			total_us += us;
+			max_us = std::max(max_us, us);
+			int bucket = 0;
+			for (u64 limit = 250; bucket < kBuckets - 1 && us >= limit; limit *= 2)
+				++bucket;
+			++buckets[bucket];
+		}
+
+		std::string Text() const
+		{
+			return fmt::format("{} served, mean {:.3f} ms, max {:.3f} ms, buckets <0.25:{} <0.5:{} <1:{} <2:{} <4:{} <8:{} "
+							   "<16:{} >=16:{}",
+				count, count ? total_us / 1000.0 / count : 0.0, max_us / 1000.0, buckets[0], buckets[1], buckets[2],
+				buckets[3], buckets[4], buckets[5], buckets[6], buckets[7]);
+		}
+	};
+	// GS thread frame times: the time between two consecutive vsyncs processed on the GS thread. In a file replay
+	// (unthrottled) this is the GS work of one frame, so shader and pipeline compiles show up as spikes; live it also
+	// contains the wait for the game's next frame. Written on the GS thread, read after MTGS::WaitGS.
+	struct GsFrameTimes
+	{
+		Common::Timer::Value last = 0;
+		u64 frames = 0, over_17ms = 0, over_33ms = 0, over_50ms = 0, over_100ms = 0;
+		double max_ms = 0.0, total_ms = 0.0;
+
+		void Vsync()
+		{
+			const Common::Timer::Value now = Common::Timer::GetCurrentValue();
+			if (last != 0)
+			{
+				const double ms = Common::Timer::ConvertValueToMilliseconds(now - last);
+				++frames;
+				total_ms += ms;
+				max_ms = std::max(max_ms, ms);
+				over_17ms += ms > 16.7;
+				over_33ms += ms > 33.3;
+				over_50ms += ms > 50.0;
+				over_100ms += ms > 100.0;
+			}
+			last = now;
+		}
+	};
+	GsFrameTimes s_gs_frames;
+
+	ReadbackTimes s_readback_interval;
+	ReadbackTimes s_readback_total;
+	u64 s_report_acquire_us = 0, s_report_acquire_count = 0, s_report_acquire_blocked = 0;
 
 	// Counters (CPU thread).
 	u64 s_frame = 0;
@@ -121,6 +256,19 @@ namespace
 			s_source->PostEvent(static_cast<u16>(proto::RecordType::error), &payload, sizeof(payload));
 	}
 
+	const char* ReadbackModeName()
+	{
+		switch (EmuConfig.GS.HWDownloadMode)
+		{
+			case GSHardwareDownloadMode::Enabled: return "accurate";
+			case GSHardwareDownloadMode::EnabledForceFull: return "accurate, full";
+			case GSHardwareDownloadMode::NoReadbacks: return "no GPU readbacks";
+			case GSHardwareDownloadMode::Unsynchronized: return "unsynchronized";
+			case GSHardwareDownloadMode::Disabled: return "disabled";
+		}
+		return "unknown";
+	}
+
 	void PostStats()
 	{
 		proto::StatsPayload stats{};
@@ -142,6 +290,19 @@ namespace
 			(s_wait_us - s_report_wait_us) / 1000.0 / frames, PerformanceMetrics::GetGSThreadAverageTime(),
 			PerformanceMetrics::GetGSThreadUsage(), PerformanceMetrics::GetGPUAverageTime(),
 			PerformanceMetrics::GetGPUUsage()));
+		// Task 037: readback service times and the time the GS thread waited for a swap chain image (with FIFO
+		// presentation the acquire blocks until the display releases an image at its refresh).
+		const u64 acquire_us = GSGetSwapChainAcquireWaitUs();
+		const u64 acquire_count = GSGetSwapChainAcquireCount();
+		const u64 acquire_blocked = GSGetSwapChainAcquireBlockedCount();
+		Console.WriteLn(fmt::format("(GSStreamReplayer) vsync {}: readbacks ({}) {}; swap chain acquire {:.3f} ms/frame, "
+									"{} acquires, {} blocked over 1 ms",
+			s_frame, ReadbackModeName(), s_readback_interval.Text(), (acquire_us - s_report_acquire_us) / 1000.0 / frames,
+			acquire_count - s_report_acquire_count, acquire_blocked - s_report_acquire_blocked));
+		s_readback_interval = {};
+		s_report_acquire_us = acquire_us;
+		s_report_acquire_count = acquire_count;
+		s_report_acquire_blocked = acquire_blocked;
 		s_report_frame = s_frame;
 		s_report_busy_us = s_busy_us;
 		s_report_wait_us = s_wait_us;
@@ -168,6 +329,13 @@ namespace
 		Console.WriteLn(fmt::format("(GSStreamReplayer) finished: {} vsyncs, {} records, {} bytes ({} GIF bytes), {} "
 									"readbacks; exit code {}",
 			s_frame, s_records, s_bytes, s_gif_bytes, s_readbacks, exit_code));
+		if (s_readback_total.count)
+			Console.WriteLn(fmt::format("(GSStreamReplayer) readbacks ({}): {}", ReadbackModeName(), s_readback_total.Text()));
+		Console.WriteLn(fmt::format("(GSStreamReplayer) GIF records started inside another path's packet: {}", s_gif_interleaved));
+		const GsFrameTimes& g = s_gs_frames;
+		Console.WriteLn(fmt::format("(GSStreamReplayer) GS thread frame times: {} frames, mean {:.3f} ms, max {:.1f} ms; over "
+									"16.7 ms {}, over 33.3 ms {}, over 50 ms {}, over 100 ms {}",
+			g.frames, g.frames ? g.total_ms / g.frames : 0.0, g.max_ms, g.over_17ms, g.over_33ms, g.over_50ms, g.over_100ms));
 		Host::RequestVMShutdown(false, false, false);
 	}
 
@@ -181,6 +349,9 @@ namespace
 		s_field_before_vsync = false;
 		s_registers_written = false;
 		s_gif_parts.clear();
+		for (GifTransferRegisterScanner& scanner : s_transfer_scanners)
+			scanner = {};
+		std::memset(vif1.transfer_registers, 0, sizeof(vif1.transfer_registers));
 		MTGS::ResetGS(true);
 	}
 
@@ -189,6 +360,15 @@ namespace
 		if (bytes == 0)
 			return;
 		const GIF_PATH gif_path = static_cast<GIF_PATH>(path - 1);
+		for (u32 other = 0; other < 3; ++other)
+		{
+			if (other != static_cast<u32>(path - 1) && s_transfer_scanners[other].loops_left != 0)
+			{
+				++s_gif_interleaved;
+				break;
+			}
+		}
+		s_transfer_scanners[path - 1].Scan(data, bytes);
 		Gif_Path& unit_path = gifUnit.gifPath[gif_path];
 		unit_path.CopyGSPacketData(const_cast<u8*>(data), bytes);
 		GS_Packet packet;
@@ -270,6 +450,7 @@ namespace
 		else
 			GSCSRr &= ~kCsrFieldBit;
 		MTGS::PostVsyncStart(s_registers_written);
+		MTGS::RunOnGSThread([]() { s_gs_frames.Vsync(); });
 		s_registers_written = false;
 		s_field_before_vsync = (vsync.flags & proto::kVsyncFlagFieldValid) ? (vsync.field != 0) : !s_field_before_vsync;
 		++s_frame;
@@ -295,7 +476,15 @@ namespace
 		const u64 bytes = static_cast<u64>(read.qwords) * 16;
 		// One extra quadword: some transfers write past the requested size (as in the dump replayer).
 		s_readback_buffer.resize(static_cast<size_t>(bytes) + 16);
+		Common::Timer timer;
 		MTGS::InitAndReadFIFO(s_readback_buffer.data(), read.qwords);
+		const u64 service_us = static_cast<u64>(timer.GetTimeNanoseconds() / 1000.0);
+		s_readback_interval.Add(service_us);
+		s_readback_total.Add(service_us);
+		// Disabled answers zeros (MTGS::InitAndReadFIFO fills the buffer); the producer counts those replies.
+		const u32 status = (EmuConfig.GS.HWDownloadMode == GSHardwareDownloadMode::Disabled && GSIsHardwareRenderer()) ?
+							   proto::kReadbackZeroFilled :
+							   proto::kReadbackOk;
 		if (!s_source->IsLive())
 			return true;
 		u64 capacity = 0;
@@ -307,7 +496,7 @@ namespace
 			return true;
 		}
 		std::memcpy(response, s_readback_buffer.data(), static_cast<size_t>(bytes));
-		s_source->CompleteReadback(read.request_id, bytes, proto::kReadbackOk);
+		s_source->CompleteReadback(read.request_id, bytes, status);
 		return true;
 	}
 
@@ -327,6 +516,11 @@ namespace
 			// Protocol bit N = path N; GSState::SoftReset bit 0 = PATH1, bit 1 = PATH2, bit 2 = PATH3.
 			const u32 mask = (reset.path_mask >> 1) & 7;
 			s_gif_parts.clear();
+			for (u32 path = 0; path < 3; ++path)
+			{
+				if (mask & (1u << path))
+					s_transfer_scanners[path] = {};
+			}
 			MTGS::RunOnGSThread([mask]() { GSgifSoftReset(mask); });
 			return true;
 		}
@@ -391,6 +585,13 @@ namespace
 			{
 				const u32 width = static_cast<u32>(control.args[0]);
 				const u32 height = static_cast<u32>(control.args[1]);
+				// A zero or oversized client area (the game window minimized) keeps the current swap chain; the child
+				// window is hidden with its parent and the next real size arrives on restore (task 038).
+				if (width == 0 || height == 0 || width > 16384 || height > 16384)
+				{
+					Console.WriteLn(fmt::format("(GSStreamReplayer) CONTROL resize {}x{} ignored", width, height));
+					return true;
+				}
 				if (s_hooks.resize)
 					s_hooks.resize(width, height);
 				MTGS::ResizeDisplayWindow(width, height, 1.0f);
