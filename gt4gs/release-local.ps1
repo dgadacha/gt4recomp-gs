@@ -124,10 +124,14 @@ Set-Content -Path $notesPath -Value $notes -Encoding UTF8
 if ($NoPublish) { Write-Host "Not published (-NoPublish). Assets in $OutDir"; exit 0 }
 $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
 if (-not $gh) { $gh = 'C:\Program Files\GitHub CLI\gh.exe' }
+# The repository of the remote "origin" (this checkout also has the PCSX2 upstream, which gh would pick by default).
+$origin = (git remote get-url origin).Trim()
+if ($origin -notmatch 'github\.com[:/](.+?)(\.git)?$') { throw "origin is not a GitHub repository: $origin" }
+$ghRepo = $Matches[1]
 if ($Release) {
-    & $gh release create $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath
+    & $gh release create --repo $ghRepo $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath
 } else {
-    & $gh release create $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath --prerelease
+    & $gh release create --repo $ghRepo $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath --prerelease
 }
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 Write-Host "Published $Tag"
