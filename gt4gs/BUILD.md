@@ -21,10 +21,10 @@ From the repository root, in a `cmd` shell:
 .github\workflows\scripts\windows\build-dependencies-gt4gs.bat
 call "<Visual Studio install>\VC\Auxiliary\Build\vcvars64.bat"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
-  -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=ON -DENABLE_TESTS=OFF ^
+  -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DENABLE_TESTS=OFF ^
   -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON ^
   -DCMAKE_PREFIX_PATH=%cd%\deps
-cmake --build build --target pcsx2-gsrunner --config Release
+cmake --build build --target pcsx2-gt4gs --config Release
 ```
 
 Dependencies are built with `DEBUG=0` and `BUILD_FFMPEG=1`. The dependency directory `deps` is cached in CI
@@ -38,6 +38,26 @@ powershell -File .github\workflows\scripts\windows\package-gt4gs.ps1 -Version <v
 ```
 
 This writes `dist\gt4-gs-<ver>-windows-x64.zip` and `dist\SHA256SUMS`.
+
+The target `pcsx2-gt4gs` (option `ENABLE_GT4GS`, default OFF) builds `gt4-gs.exe`. Configure fails
+when a file in `3rdparty/gt4recomp-gs-stream/` differs from its `SHA256SUMS` entry.
+
+## Local build (owner machine, task 036)
+
+Used for iteration on `gt4gs/live`; the CI recipe above stays the reference for releases.
+
+- Dependencies: the same script into a scratch root (`DEBUG=0`, `BUILD_FFMPEG=0`). PCSX2 v2.8.2 compiles against
+  its bundled FFmpeg headers on Windows and loads FFmpeg at run time (video capture only), so FFmpeg is not
+  needed to build or run the GS; a package built this way has no FFmpeg DLLs. Time on a Ryzen 7 5700X: about
+  15 minutes (shaderc dominates); 44 MB installed.
+- The script must have CRLF line endings when run by `cmd` (with LF endings `call :label` jumps go wrong and
+  downloads are skipped). Git for Windows checks it out with CRLF when `core.autocrlf=true`.
+- `vswhere` needs `-products *` to find a Build Tools-only install (fixed in the script on `gt4gs/live`).
+- Configure and build: Visual Studio 2022 Build Tools (MSVC 14.44), CMake 4.3, Ninja 1.13, `Release`,
+  `-DDISABLE_ADVANCE_SIMD=ON`, without `CMAKE_INTERPROCEDURAL_OPTIMIZATION` (faster). Cold build 751 steps in
+  about 10 minutes; `gt4-gs.exe` about 9.9 MB.
+- Package with `package-gt4gs.ps1` as above. Local and CI packages are not bit-identical (different MSVC and
+  LTO settings); the GT4Recomp launcher pins the exact package it uses.
 
 ## Renderers in this build
 

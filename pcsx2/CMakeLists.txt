@@ -71,6 +71,7 @@ set(pcsx2Sources
 	Gif_Unit.cpp
 	GS.cpp
 	GSDumpReplayer.cpp
+	GSStreamReplayer.cpp
 	Host.cpp
 	Hotkeys.cpp
 	Hw.cpp
@@ -156,6 +157,7 @@ set(pcsx2Headers
 	Gif_Unit.h
 	GS.h
 	GSDumpReplayer.h
+	GSStreamReplayer.h
 	Hardware.h
 	Host.h
 	Hw.h
@@ -1207,7 +1209,24 @@ if(ARCH_X86)
 	target_include_directories(PCSX2_FLAGS INTERFACE "${CMAKE_SOURCE_DIR}/3rdparty/xbyak")
 	target_compile_definitions(PCSX2_FLAGS INTERFACE XBYAK_NO_EXCEPTION)
 endif()
+# GT4Recomp fork: the MIT GS stream protocol header used by GSStreamReplayer, vendored by hash.
+set(GT4GS_STREAM_DIR "${CMAKE_SOURCE_DIR}/3rdparty/gt4recomp-gs-stream")
+file(STRINGS "${GT4GS_STREAM_DIR}/SHA256SUMS" gt4gs_stream_sums)
+foreach(line IN LISTS gt4gs_stream_sums)
+	if(NOT line MATCHES "^([0-9a-f]+) [ *]?(.+)$")
+		message(FATAL_ERROR "gt4recomp-gs-stream: bad SHA256SUMS line '${line}'")
+	endif()
+	set(expected "${CMAKE_MATCH_1}")
+	set(vendored "${CMAKE_MATCH_2}")
+	file(SHA256 "${GT4GS_STREAM_DIR}/${vendored}" actual)
+	if(NOT actual STREQUAL expected)
+		message(FATAL_ERROR "gt4recomp-gs-stream: ${vendored} has SHA-256 ${actual}, SHA256SUMS expects ${expected}")
+	endif()
+endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GT4GS_STREAM_DIR}/SHA256SUMS")
+
 target_include_directories(PCSX2_FLAGS INTERFACE
+	"${GT4GS_STREAM_DIR}"
 	"${CMAKE_CURRENT_SOURCE_DIR}"
 	"${CMAKE_BINARY_DIR}/pcsx2"
 	"${CMAKE_BINARY_DIR}/common/include"

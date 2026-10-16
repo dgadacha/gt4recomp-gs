@@ -1,5 +1,5 @@
 # GT4Recomp GS process (gt4-gs.exe) for Windows x64. See gt4gs/BUILD.md.
-# Build: pcsx2-gsrunner with ENABLE_QT_UI=OFF and ENABLE_GSRUNNER=ON, MSVC, Ninja.
+# Build: pcsx2-gt4gs (gt4-gs.exe) with ENABLE_QT_UI=OFF and ENABLE_GT4GS=ON, MSVC, Ninja.
 # Release: a tag gt4gs-v* publishes the zip, SHA256SUMS and a source archive.
 name: GT4GS Windows
 
@@ -62,16 +62,16 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTPATH=%%i"
           call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
-            -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=ON -DENABLE_TESTS=OFF ^
+            -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DENABLE_TESTS=OFF ^
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON ^
             "-DCMAKE_PREFIX_PATH=%cd%\deps" || exit /b 1
 
-      - name: Build pcsx2-gsrunner
+      - name: Build gt4-gs (pcsx2-gt4gs)
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTPATH=%%i"
           call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          cmake --build build --target pcsx2-gsrunner --config Release || exit /b 1
+          cmake --build build --target pcsx2-gt4gs --config Release || exit /b 1
 
       - name: Package gt4-gs
         id: package

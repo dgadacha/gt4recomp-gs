@@ -14,6 +14,7 @@
 #include "GS.h"
 #include "GS/Renderers/HW/GSTextureReplacements.h"
 #include "GSDumpReplayer.h"
+#include "GSStreamReplayer.h"
 #include "GameDatabase.h"
 #include "GameList.h"
 #include "Host.h"
@@ -1241,6 +1242,14 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 {
 	if (!filename.empty())
 	{
+		if (GSStreamReplayer::IsActive())
+		{
+			// GT4Recomp fork: the frontend prepared a GS stream; the filename only names it (it may be a shared
+			// memory session name, not a file).
+			CDVDsys_ChangeSource(CDVD_SourceType::NoDisc);
+			return GSStreamReplayer::Initialize(error);
+		}
+
 		if (!FileSystem::FileExists(filename.c_str()))
 		{
 			Error::SetStringFmt(error, TRANSLATE_FS("VMManager", "Requested filename '{}' does not exist."), filename);
@@ -2703,7 +2712,7 @@ void VMManager::UpdateCPUImplementations()
 {
 	if (GSDumpReplayer::IsReplayingDump())
 	{
-		Cpu = &GSDumpReplayerCpu;
+		Cpu = GSStreamReplayer::IsActive() ? &GSStreamReplayerCpu : &GSDumpReplayerCpu;
 		psxCpu = &psxInt;
 		CpuVU0 = &CpuIntVU0;
 		CpuVU1 = &CpuIntVU1;

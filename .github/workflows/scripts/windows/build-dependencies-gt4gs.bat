@@ -4,12 +4,12 @@ setlocal enabledelayedexpansion
 echo Setting environment...
 rem Favour VS2022 over VS2026 for now.
 if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
-  for /f "usebackq tokens=*" %%i in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[17, 18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
+  for /f "usebackq tokens=*" %%i in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -products * -version "[17, 18)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
   if defined VSINSTPATH (
     echo VSINSTPATH=!VSINSTPATH!
     call "!VSINSTPATH!\VC\Auxiliary\Build\vcvars64.bat" || goto error
   ) else (
-    for /f "usebackq tokens=*" %%i in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version "[18, 19)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
+    for /f "usebackq tokens=*" %%i in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -products * -version "[18, 19)" -latest -property installationPath`) do set "VSINSTPATH=%%i"
     if defined VSINSTPATH (
       echo VSINSTPATH=!VSINSTPATH!
       call "!VSINSTPATH!\VC\Auxiliary\Build\vcvars64.bat" || goto error

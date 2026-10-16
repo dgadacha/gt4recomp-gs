@@ -25,6 +25,15 @@ Our changes
   dependency script build-dependencies-gt4gs.bat (upstream's build-dependencies.bat without the Qt
   block; Qt is not needed when ENABLE_QT_UI=OFF).
 - 2026-10-15: upstream workflows changed to workflow_dispatch only (no upstream file deleted).
+- 2026-10-16 (branch gt4gs/live, task 036): new files pcsx2/GSStreamReplayer.{h,cpp} (GS stream CPU
+  provider), pcsx2-gt4gs/ (gt4-gs.exe frontend, derived from pcsx2-gsrunner/Main.cpp, and the no-throw
+  StreamTransport adapter), 3rdparty/gt4recomp-gs-stream/ (MIT protocol files from GT4Recomp, vendored by
+  hash). Modified: pcsx2/VMManager.cpp (boot a prepared GS stream without BIOS or disc; select its CPU
+  provider), pcsx2/GSDumpReplayer.cpp (a stream counts as a dump replay; serial from the stream; no dump
+  overlay), common/Console.cpp (console text is also written to redirected standard handles),
+  pcsx2/CMakeLists.txt, CMakeLists.txt and cmake/BuildParameters.cmake (sources, hash check, ENABLE_GT4GS),
+  the dependency script (vswhere -products *), the packaging script and the gt4gs-windows workflow (build
+  pcsx2-gt4gs).
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5
@@ -37,6 +46,12 @@ Source
 The corresponding source is the git tag of each release (gt4gs-v*) at
 https://github.com/moesuito/gt4recomp-gs. Each GitHub Release attaches a source archive of that tag
 (GPLv3 section 6(d)). SOURCE.txt in the zip names the exact commit.
+
+GT4Recomp GS stream protocol (MIT)
+----------------------------------
+3rdparty/gt4recomp-gs-stream/ holds files from https://github.com/moesuito/gt4-staticrecomp
+(native/gs_stream/, commit 57d1fa5) under the MIT license (3rdparty/gt4recomp-gs-stream/LICENSE.MIT).
+pcsx2-gt4gs/StreamTransport.{h,cpp} are MIT as well. MIT code is compatible with GPL-3.0-or-later.
 
 Bundled third-party components
 ------------------------------
