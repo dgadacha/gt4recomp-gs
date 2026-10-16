@@ -45,9 +45,11 @@ cmd /c "call `"$vcvars`" >nul && $configure cmake --build `"$Build`" --target pc
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 
 # Tool versions and the dependency script hash, for SOURCE.txt and the notes.
-$compiler = (cmd /c "call `"$vcvars`" >nul && cl 2>&1" | Select-Object -First 1).Trim()
-$cmakeVersion = (cmd /c "call `"$vcvars`" >nul && cmake --version" | Select-Object -First 1).Trim()
-$ninjaVersion = (cmd /c "call `"$vcvars`" >nul && ninja --version" | Select-Object -First 1).Trim()
+# Version numbers only (the cl banner is localized). vcvars may print vswhere noise on stderr: discarded.
+$clBanner = (cmd /c "call `"$vcvars`" >nul 2>nul && cl 2>&1" | Select-Object -First 1)
+$compiler = if ($clBanner -match '(\d+\.\d+\.\d+)') { "MSVC cl $($Matches[1]) x64 ($((Split-Path -Leaf $vs)))" } else { 'MSVC cl (unknown version)' }
+$cmakeVersion = ((cmd /c "call `"$vcvars`" >nul 2>nul && cmake --version" | Select-Object -First 1) -replace 'cmake version ', '').Trim()
+$ninjaVersion = (cmd /c "call `"$vcvars`" >nul 2>nul && ninja --version" | Select-Object -First 1).Trim()
 $depsScript = '.github/workflows/scripts/windows/build-dependencies-gt4gs.bat'
 $depsHash = (Get-FileHash -Algorithm SHA256 (Join-Path $repo $depsScript)).Hash.ToLower()
 
@@ -122,7 +124,10 @@ Set-Content -Path $notesPath -Value $notes -Encoding UTF8
 if ($NoPublish) { Write-Host "Not published (-NoPublish). Assets in $OutDir"; exit 0 }
 $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
 if (-not $gh) { $gh = 'C:\Program Files\GitHub CLI\gh.exe' }
-$kind = if ($Release) { @() } else { @('--prerelease') }
-& $gh release create $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath @kind
+if ($Release) {
+    & $gh release create $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath
+} else {
+    & $gh release create $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath --prerelease
+}
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 Write-Host "Published $Tag"
