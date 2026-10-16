@@ -23,7 +23,8 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 - Branch `gt4gs/live` (task 036): `gt4-gs.exe` is built by the new frontend `pcsx2-gt4gs/` (from
   `pcsx2-gsrunner`) and consumes the GT4Recomp GS stream live. Prerelease `gt4gs-v0.2.0-live`.
 - Branch `gt4gs/window` (tasks 037 and 038): readback modes and timing, own data and cache folders, deferred swap
-  chain acquire, window hardening. Prerelease `gt4gs-v0.3.0`.
+  chain acquire, window hardening. Prerelease `gt4gs-v0.3.0`; `gt4gs-v0.3.1` fixes a click on the picture leaving
+  the game window inactive.
 
 ## gt4-gs.exe
 
@@ -66,8 +67,11 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
 - **Window.** A hidden, non-activating popup is created at start so the Vulkan device has a surface. On
   CONTROL attach_window the window thread (which only pumps messages) makes it a `WS_CHILD` of the game
   window covering its client area and detaches its input queue from the game's window thread (0.3.0), so a
-  stalled GS window thread cannot hold up the game's input. It answers `WM_MOUSEACTIVATE` with `MA_NOACTIVATE`
-  (bringing the game window to the foreground when needed) and gives focus back to the parent. Resize follows
+  stalled GS window thread cannot hold up the game's input. With detached queues a click on the picture makes the GS
+  window thread the foreground thread; since 0.3.1 every click posts a message that gives the foreground back to the
+  game window (this thread received the click, so Windows allows it), `WM_MOUSEACTIVATE` returns `MA_NOACTIVATE`, and
+  the child no longer answers `HTTRANSPARENT` (across threads that only discarded the click). Focus goes back to the
+  parent. Resize follows
   CONTROL resize; a zero size (minimized game window) is ignored. `[GT4GS] DebugStallWindowMs` and
   `DebugStallAfterMs` stall the window thread once, for tests only.
 - **Headless.** `[GT4GS] Surfaceless = true` runs without a window; `DumpDir` and `DumpEvery` write frame

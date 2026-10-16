@@ -43,6 +43,8 @@ Our changes
   Modified PCSX2 files: pcsx2/GS/GS.h and pcsx2/GS/GS.cpp (swap chain acquire accounting and the deferred
   acquire switch), pcsx2/GS/Renderers/Vulkan/VKSwapChain.cpp (acquire timing),
   pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp (the acquire after present is skipped when deferred).
+- 2026-10-16 (release 0.3.1): pcsx2-gt4gs/Main.cpp: a click on the picture no longer leaves the game window
+  inactive (the GS window thread gives the foreground back to the game window; no HTTRANSPARENT).
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5

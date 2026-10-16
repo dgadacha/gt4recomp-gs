@@ -64,6 +64,7 @@ Used for iteration on `gt4gs/live`; the CI recipe above stays the reference for 
 Same recipe as task 036 into a fresh build directory (GT4Recomp `private/slice194-gt4gs-build`, dependencies of
 `private/slice193-gt4gs-deps` reused): cold build 751 steps in about 6 minutes, incremental rebuilds after the
 GS stream changes 3 to 10 steps. Package `gt4-gs-0.3.0-windows-x64.zip` with `package-gt4gs.ps1 -Version 0.3.0`.
+Release 0.3.1: fresh build directory `private/slice195-gt4gs-build`, `package-gt4gs.ps1 -Version 0.3.1`.
 
 ## Renderers in this build
 

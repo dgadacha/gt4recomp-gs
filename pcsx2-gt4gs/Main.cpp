@@ -13,7 +13,11 @@
 // window of this process that becomes a WS_CHILD of the game's window on CONTROL attach_window; the window thread
 // only pumps messages and never takes focus. After SetParent the window thread detaches its input queue from the
 // game's window thread (cross-process SetParent attaches them), so a stalled GS window thread cannot hold up the
-// game's keyboard or mouse input; a click on the GS picture brings the game window to the foreground (task 038).
+// game's keyboard or mouse input. With detached queues a click on the picture makes this thread the foreground thread
+// (it has no active window, so the game window was left inactive in 0.3.0; a disabled child does the same). In 0.3.1
+// every click posts a message to this thread, which then gives the foreground back to the game window (this thread
+// received the click, so Windows lets it), and the child returns MA_NOACTIVATE (task 038). The child no longer
+// answers WM_NCHITTEST with HTTRANSPARENT: across threads that only discarded the click (after the foreground switch).
 // Folders: in the stream modes the data root is [GT4GS] DataRoot (default %LOCALAPPDATA%\GT4Recomp\gt4-gs), never the
 // PCSX2 user folder, and the [Folders] keys of the --config file (Cache, Textures, ...) are applied (task 037).
 
@@ -118,7 +122,7 @@ static std::string s_config_path;
 static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
-static constexpr const char* GT4GS_VERSION = "gt4gs 0.3.0 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 0.3.1 (PCSX2 v2.8.2)";
 static bool s_data_root_from_config = false;
 static u32 s_spin_us = 0; // [GT4GS] SpinUs: transport spin before sleeping (0: the transport default, 30 us)
 static u32 s_debug_stall_window_ms = 0; // [GT4GS] DebugStallWindowMs: test only, window thread stall after attach
@@ -1519,6 +1523,7 @@ void GSRunner::StopPlatformMessagePump()
 // GT4Recomp: requests from the CPU thread, executed on the window thread (which only pumps messages).
 static constexpr UINT GT4GS_ATTACH_MSG = WM_APP + 0x101; // wParam = parent HWND, lParam = MAKELPARAM(width, height)
 static constexpr UINT GT4GS_RESIZE_MSG = WM_APP + 0x102; // lParam = MAKELPARAM(width, height)
+static constexpr UINT GT4GS_GIVE_BACK_FOREGROUND_MSG = WM_APP + 0x103; // posted by a click on the picture
 static HANDLE s_attach_done = nullptr;
 static std::atomic<bool> s_attach_ok{false};
 
@@ -1597,16 +1602,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					return 0;
 				}
 				break;
-			case WM_NCHITTEST:
-				return HTTRANSPARENT; // same-thread windows only; the parent is in another process
 			case WM_MOUSEACTIVATE:
+			case WM_LBUTTONDOWN:
+			case WM_RBUTTONDOWN:
+			case WM_MBUTTONDOWN:
+			case WM_XBUTTONDOWN:
+				// The click made this thread the foreground thread; give the foreground back to the game window once
+				// the system has finished processing the click (posted, so it runs after the activation change).
+				PostMessageW(hwnd, GT4GS_GIVE_BACK_FOREGROUND_MSG, 0, 0);
+				return msg == WM_MOUSEACTIVATE ? MA_NOACTIVATE : 0;
+			case GT4GS_GIVE_BACK_FOREGROUND_MSG:
 			{
-				// A click on the picture: bring the game window forward (this process received the click, so it may),
-				// but never activate this child.
 				const HWND root = GetAncestor(hwnd, GA_ROOT);
-				if (root && root != hwnd && GetForegroundWindow() != root)
-					SetForegroundWindow(root);
-				return MA_NOACTIVATE;
+				const HWND before = GetForegroundWindow();
+				const BOOL done = (root && root != hwnd && before != root) ? SetForegroundWindow(root) : TRUE;
+				std::fprintf(stderr, "gt4-gs: click on the picture: foreground was %p, game window %p, give back %s\n",
+					static_cast<void*>(before), static_cast<void*>(root), done ? "ok" : "refused");
+				std::fflush(stderr);
+				return 0;
 			}
 			case WM_SETFOCUS:
 				if (HWND parent = GetParent(hwnd))
