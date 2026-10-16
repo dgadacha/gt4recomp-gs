@@ -6,8 +6,9 @@
 #     [-Release] [-NoPublish]
 #
 # Steps: refuse a dirty tree or a HEAD that is not exactly -Tag; configure (if needed) and build pcsx2-gt4gs Release with
-# the local recipe of BUILD.md (VS Build Tools vcvars64, Ninja, no LTO, the dependencies in -Deps); package the CI zip
-# layout (gt4-gs.exe, DLLs, resources, COPYING.GPLv3, NOTICE, README.md, SOURCE.txt with tag, commit and tool versions);
+# the local recipe of BUILD.md (VS Build Tools vcvars64, Ninja, no LTO, GT4GS_ONLY=ON (JIT-free, since 0.4.0), the
+# dependencies in -Deps); package the CI zip layout (gt4-gs.exe, DLLs, resources, COPYING.GPLv3, NOTICE, README.md,
+# SOURCE.txt with tag, commit and tool versions); refuse the package unless gt4gs/check-nojit.ps1 passes on it;
 # make the source archive with `git archive` of the tag (GPLv3 section 6(d)); write SHA256SUMS; publish with
 # `gh release create` (a prerelease unless -Release) with the three assets and notes. -NoPublish stops before gh.
 param(
@@ -38,11 +39,13 @@ $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
 $configure = ''
 if (-not (Test-Path (Join-Path $Build 'build.ninja'))) {
     $configure = "cmake -S `"$repo`" -B `"$Build`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl " +
-        "-DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DENABLE_TESTS=OFF -DDISABLE_ADVANCE_SIMD=ON " +
+        "-DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DGT4GS_ONLY=ON -DENABLE_TESTS=OFF -DDISABLE_ADVANCE_SIMD=ON " +
         "`"-DCMAKE_PREFIX_PATH=$Deps`" && "
 }
 cmd /c "call `"$vcvars`" >nul && $configure cmake --build `"$Build`" --target pcsx2-gt4gs"
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+# An existing build directory must be a JIT-free configuration too.
+if (-not (Select-String -Quiet -SimpleMatch 'GT4GS_ONLY:BOOL=ON' (Join-Path $Build 'CMakeCache.txt'))) { throw "$Build is not configured with GT4GS_ONLY=ON" }
 
 # Tool versions and the dependency script hash, for SOURCE.txt and the notes.
 # Version numbers only (the cl banner is localized). vcvars may print vswhere noise on stderr: discarded.
@@ -82,7 +85,7 @@ $toolLines = @(
     "Compiler: $compiler",
     "CMake: $cmakeVersion",
     "Ninja: $ninjaVersion",
-    "Build options: Release, Ninja, ENABLE_QT_UI=OFF, ENABLE_GT4GS=ON, DISABLE_ADVANCE_SIMD=ON, no LTO",
+    "Build options: Release, Ninja, ENABLE_QT_UI=OFF, ENABLE_GT4GS=ON, GT4GS_ONLY=ON (JIT-free), DISABLE_ADVANCE_SIMD=ON, no LTO",
     "Dependency script: $depsScript sha256 $depsHash"
 )
 $source = @(
@@ -94,6 +97,10 @@ $source = @(
     "Binary: gt4-gs.exe from pcsx2-gt4gs (GSRunner frontend plus the GS stream consumer; no GT4 game code)"
 ) + $toolLines + @("Bundled DLLs: " + ($dllNames -join ', '))
 Set-Content -Path (Join-Path $stage 'SOURCE.txt') -Value $source -Encoding ASCII
+# No-JIT check of the staged package (markers, section flags, Arbitrary Code Guard import); the report is kept next to
+# the zip.
+& powershell -NoProfile -File (Join-Path $repo 'gt4gs/check-nojit.ps1') -Path $stage -Report (Join-Path $OutDir 'check-nojit.json')
+if ($LASTEXITCODE -ne 0) { throw 'check-nojit.ps1 failed on the package' }
 $zip = Join-Path $OutDir "$name.zip"
 Compress-Archive -Path $stage -DestinationPath $zip
 Remove-Item -Recurse -Force $stage

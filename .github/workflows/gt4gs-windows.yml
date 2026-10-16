@@ -1,5 +1,5 @@
 # GT4Recomp GS process (gt4-gs.exe) for Windows x64. See gt4gs/BUILD.md.
-# Build: pcsx2-gt4gs (gt4-gs.exe) with ENABLE_QT_UI=OFF and ENABLE_GT4GS=ON, MSVC, Ninja.
+# Build: pcsx2-gt4gs (gt4-gs.exe) with ENABLE_QT_UI=OFF, ENABLE_GT4GS=ON and GT4GS_ONLY=ON (JIT-free), MSVC, Ninja.
 # Manual fallback only (owner decision 2026-10-16): releases are built and published from the owner's PC with
 # gt4gs/release-local.ps1, which is much faster than this workflow. Started by hand on a gt4gs-v* tag, the release job
 # below still publishes the zip, SHA256SUMS and a source archive.
@@ -61,7 +61,7 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTPATH=%%i"
           call "%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
-            -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DENABLE_TESTS=OFF ^
+            -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DGT4GS_ONLY=ON -DENABLE_TESTS=OFF ^
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON ^
             "-DCMAKE_PREFIX_PATH=%cd%\deps" || exit /b 1
 

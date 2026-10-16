@@ -95,7 +95,12 @@ bool SysMemory::AllocateMemoryMap()
 		return false;
 	}
 
+#ifdef GT4GS_NO_JIT
+	// GT4Recomp fork, JIT-free gt4-gs.exe: no recompiler code area is reserved or mapped; only the data memory.
+	if (!(s_memory_mapping_area = SharedMemoryMappingArea::Create(HostMemoryMap::MainSize, false)))
+#else
 	if (!(s_memory_mapping_area = SharedMemoryMappingArea::Create(HostMemoryMap::MainSize + HostMemoryMap::CodeSize, true)))
+#endif
 	{
 		Host::ReportErrorAsync("Error", "Failed to map main memory.");
 		ReleaseMemoryMap();
@@ -109,12 +114,14 @@ bool SysMemory::AllocateMemoryMap()
 		return false;
 	}
 
+#ifndef GT4GS_NO_JIT
 	if ((s_code_memory = s_memory_mapping_area->Map(nullptr, 0, s_memory_mapping_area->OffsetPointer(HostMemoryMap::MainSize), HostMemoryMap::CodeSize, PageAccess_Any())) == nullptr)
 	{
 		Host::ReportErrorAsync("Error", "Failed to allocate code memory.");
 		ReleaseMemoryMap();
 		return false;
 	}
+#endif
 
 	HostMemoryMap::EEmem = (uptr)(s_data_memory + HostMemoryMap::EEmemOffset);
 	HostMemoryMap::IOPmem = (uptr)(s_data_memory + HostMemoryMap::IOPmemOffset);
@@ -136,6 +143,7 @@ void SysMemory::DumpMemoryMap()
 	DUMP_REGION("VTLB Virtual Map", s_data_memory, HostMemoryMap::VTLBVirtualMapOffset, HostMemoryMap::VTLBVirtualMapSize);
 	DUMP_REGION("VTLB Address Map", s_data_memory, HostMemoryMap::VTLBAddressMapOffset, HostMemoryMap::VTLBAddressMapSize);
 
+#ifndef GT4GS_NO_JIT
 	DUMP_REGION("R5900 Recompiler Cache", s_code_memory, HostMemoryMap::EErecOffset, HostMemoryMap::EErecSize);
 	DUMP_REGION("R3000A Recompiler Cache", s_code_memory, HostMemoryMap::IOPrecOffset, HostMemoryMap::IOPrecSize);
 	DUMP_REGION("Micro VU0 Recompiler Cache", s_code_memory, HostMemoryMap::mVU0recOffset, HostMemoryMap::mVU0recSize);
@@ -144,6 +152,7 @@ void SysMemory::DumpMemoryMap()
 	DUMP_REGION("VIF1 Unpack Recompiler Cache", s_code_memory, HostMemoryMap::VIF1recOffset, HostMemoryMap::VIF1recSize);
 	DUMP_REGION("VIF Unpack Recompiler Cache", s_code_memory, HostMemoryMap::VIFUnpackRecOffset, HostMemoryMap::VIFUnpackRecSize);
 	DUMP_REGION("GS Software Renderer", s_code_memory, HostMemoryMap::SWrecOffset, HostMemoryMap::SWrecSize);
+#endif
 
 
 #undef DUMP_REGION
@@ -222,8 +231,13 @@ u8* SysMemory::GetDataPtr(size_t offset)
 
 u8* SysMemory::GetCodePtr(size_t offset)
 {
+#ifdef GT4GS_NO_JIT
+	pxFailRel("GT4GS: JIT-free build has no code memory");
+	return nullptr;
+#else
 	pxAssert(offset <= HostMemoryMap::CodeSize);
 	return s_code_memory + offset;
+#endif
 }
 
 void* SysMemory::GetDataFileHandle()

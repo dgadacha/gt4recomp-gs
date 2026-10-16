@@ -122,7 +122,13 @@ static std::string s_config_path;
 static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
-static constexpr const char* GT4GS_VERSION = "gt4gs 0.3.2 (PCSX2 v2.8.2)";
+#ifdef GT4GS_NO_JIT
+static constexpr const char* GT4GS_VERSION = "gt4gs 0.4.0 (PCSX2 v2.8.2, no JIT)";
+#else
+static constexpr const char* GT4GS_VERSION = "gt4gs 0.4.0 (PCSX2 v2.8.2)";
+#endif
+// [GT4GS] ProhibitDynamicCode (JIT-free build only, default true): Windows Arbitrary Code Guard for this process.
+static bool s_prohibit_dynamic_code = true;
 static bool s_data_root_from_config = false;
 static u32 s_spin_us = 0; // [GT4GS] SpinUs: transport spin before sleeping (0: the transport default, 30 us)
 static u32 s_debug_stall_window_ms = 0; // [GT4GS] DebugStallWindowMs: test only, window thread stall after attach
@@ -666,6 +672,7 @@ bool GSRunner::ApplyGT4Config()
 	}
 	s_live_surfaceless = ini.GetBoolValue("GT4GS", "Surfaceless", false);
 	s_spin_us = static_cast<u32>(std::clamp(ini.GetIntValue("GT4GS", "SpinUs", 0), 0, 2000));
+	s_prohibit_dynamic_code = ini.GetBoolValue("GT4GS", "ProhibitDynamicCode", true);
 	// Live presentation: acquire the next swap chain image at the next present, not right after this one (task 037).
 	GSSetDeferredSwapChainAcquire(ini.GetBoolValue("GT4GS", "DeferSwapChainAcquire", s_stream_mode == StreamMode::Live));
 	s_debug_stall_window_ms = static_cast<u32>(std::clamp(ini.GetIntValue("GT4GS", "DebugStallWindowMs", 0), 0, 60000));
@@ -1216,6 +1223,13 @@ void GSRunner::SettingsOverride()
 			s_settings_interface.SetIntValue("EmuCore/GS", "OsdMessagesPos", static_cast<int>(OsdOverlayPos::None));
 	}
 
+#ifdef GT4GS_NO_JIT
+	// JIT-free build: no recompiler exists, so the configuration says so too (interpreters, no fastmem). The stream and
+	// dump replayers never execute guest code; this only keeps the recompiler-dependent paths switched off.
+	for (const char* key : {"EnableEE", "EnableIOP", "EnableVU0", "EnableVU1", "EnableFastmem", "EnableEECache"})
+		s_settings_interface.SetBoolValue("EmuCore/CPU/Recompiler", key, false);
+#endif
+
 	// remove memory cards, so we don't have sharing violations
 	for (u32 i = 0; i < 2; i++)
 	{
@@ -1257,6 +1271,79 @@ void GSRunner::DumpStats()
 #define main real_main
 #endif
 
+#ifdef GT4GS_NO_JIT
+// JIT-free build (GT4GS_ONLY): nothing in this binary generates code. Windows' Arbitrary Code Guard
+// (ProcessDynamicCodePolicy, ProhibitDynamicCode) makes the OS refuse any executable private memory for the rest of the
+// process lifetime, so a code generator that slipped in, or a library that tries one, fails hard instead of running.
+// Graphics drivers that need dynamic code in our process would fail too; [GT4GS] ProhibitDynamicCode = false is the
+// switch for that case (the binary stays JIT-free; only the OS enforcement is off). The probe allocation proves the
+// policy is active. Messages go to plain stderr: the PCSX2 console is not set up again until the VM starts.
+static void ApplyNoJitPolicy()
+{
+	std::fprintf(stderr, "GT4GS no-JIT: %s, JIT-free build (no EE/IOP/VU/VIF recompilers, no x86 emitter, no GS software "
+						 "JIT, no executable memory; C software rasterizer)\n", GT4GS_VERSION);
+#ifdef _WIN32
+	if (!s_prohibit_dynamic_code)
+	{
+		std::fprintf(stderr, "GT4GS no-JIT: Arbitrary Code Guard not enabled ([GT4GS] ProhibitDynamicCode = false)\n");
+		std::fflush(stderr);
+		return;
+	}
+	PROCESS_MITIGATION_DYNAMIC_CODE_POLICY policy = {};
+	policy.ProhibitDynamicCode = 1;
+	if (!SetProcessMitigationPolicy(ProcessDynamicCodePolicy, &policy, sizeof(policy)))
+	{
+		std::fprintf(stderr, "GT4GS no-JIT: SetProcessMitigationPolicy(ProhibitDynamicCode) failed, error %lu\n",
+			GetLastError());
+		std::fflush(stderr);
+		return;
+	}
+	PROCESS_MITIGATION_DYNAMIC_CODE_POLICY active = {};
+	GetProcessMitigationPolicy(GetCurrentProcess(), ProcessDynamicCodePolicy, &active, sizeof(active));
+	void* probe = VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+	const DWORD probe_error = probe ? 0 : GetLastError();
+	if (probe)
+	{
+		VirtualFree(probe, 0, MEM_RELEASE);
+		std::fprintf(stderr, "GT4GS no-JIT: Arbitrary Code Guard is set but an executable allocation still succeeded\n");
+	}
+	else
+	{
+		std::fprintf(stderr, "GT4GS no-JIT: Arbitrary Code Guard on (ProhibitDynamicCode=%u); probe RWX allocation "
+							 "refused, error %lu\n", static_cast<unsigned>(active.ProhibitDynamicCode), probe_error);
+	}
+	std::fflush(stderr);
+#endif
+}
+
+// Walks the address space and reports every committed region with an executable protection that is not part
+// of a loaded image (EXE/DLL). A JIT would leave such regions behind; the JIT-free build should report none.
+static void LogExecutableMemoryAudit(const char* when)
+{
+#ifdef _WIN32
+	constexpr DWORD exec_mask = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+	u32 regions = 0;
+	u32 exec_non_image = 0;
+	MEMORY_BASIC_INFORMATION mbi;
+	for (u8* addr = nullptr; VirtualQuery(addr, &mbi, sizeof(mbi)) == sizeof(mbi);
+		 addr = static_cast<u8*>(mbi.BaseAddress) + mbi.RegionSize)
+	{
+		regions++;
+		if (mbi.State == MEM_COMMIT && (mbi.Protect & exec_mask) != 0 && mbi.Type != MEM_IMAGE)
+		{
+			exec_non_image++;
+			Console.WarningFmt("GT4GS no-JIT audit ({}): executable {} region at {} size {} protect 0x{:x}", when,
+				mbi.Type == MEM_PRIVATE ? "private" : "mapped", mbi.BaseAddress, mbi.RegionSize, mbi.Protect);
+		}
+		if (static_cast<u8*>(mbi.BaseAddress) + mbi.RegionSize < addr)
+			break;
+	}
+	Console.WriteLnFmt("GT4GS no-JIT audit ({}): {} regions, {} executable non-image regions", when, regions,
+		exec_non_image);
+#endif
+}
+#endif
+
 static void CPUThreadMain(VMBootParameters* params, std::atomic<int>* ret)
 {
 	ret->store(EXIT_FAILURE);
@@ -1279,6 +1366,10 @@ static void CPUThreadMain(VMBootParameters* params, std::atomic<int>* ret)
 				g_gs_device->SetGPUTimingEnabled(true);
 			while (VMManager::GetState() == VMState::Running)
 				VMManager::Execute();
+#ifdef GT4GS_NO_JIT
+			// The GS device, its threads and the graphics driver are still alive here.
+			LogExecutableMemoryAudit("end of stream, GS device open");
+#endif
 			VMManager::Shutdown(false);
 			GSRunner::DumpStats();
 			ret->store(s_stream_mode != StreamMode::None ? GSStreamReplayer::GetExitCode() : EXIT_SUCCESS);
@@ -1330,6 +1421,11 @@ int main(int argc, char* argv[])
 			return 2;
 	}
 
+#ifdef GT4GS_NO_JIT
+	// Before the window, the VM and GS threads, the GS device and the graphics driver exist in this process.
+	ApplyNoJitPolicy();
+#endif
+
 	if (s_use_window.value_or(true) && !GSRunner::CreatePlatformWindow())
 	{
 		Console.Error("Failed to create window.");
@@ -1344,6 +1440,10 @@ int main(int argc, char* argv[])
 	cputhread.join();
 
 	GSRunner::DestroyPlatformWindow();
+
+#ifdef GT4GS_NO_JIT
+	LogExecutableMemoryAudit("at exit");
+#endif
 
 	return thread_ret.load();
 }

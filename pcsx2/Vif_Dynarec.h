@@ -43,4 +43,10 @@ alignas(16) extern nVifStruct nVif[2];
 alignas(16) extern nVifCall nVifUpk[(2 * 2 * 16) * 4]; // ([USN][Masking][Unpack Type]) [curCycle]
 alignas(16) extern u32      nVifMask[3][4][4];         // [MaskNumber][CycleNumber][Vector]
 
+#ifdef GT4GS_NO_JIT
+// GT4Recomp fork, JIT-free gt4-gs.exe: no VIF unpack recompiler; the interpreter loops (_nVifUnpack) are used.
+// The call sites use `if constexpr`, so the recompiler functions are never referenced.
+static constexpr bool newVifDynaRec = 0;
+#else
 static constexpr bool newVifDynaRec = 1; // Use code in Vif_Dynarec.inl
+#endif

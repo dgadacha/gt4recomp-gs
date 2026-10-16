@@ -4,6 +4,9 @@
 #include "GS/Renderers/Common/GSFunctionMap.h"
 #include "Memory.h"
 
+// GT4Recomp fork: no GS software JIT code buffers in the JIT-free gt4-gs.exe (GT4GS_NO_JIT).
+#ifndef GT4GS_NO_JIT
+
 namespace GSCodeReserve
 {
 	static u8* s_memory_base;
@@ -34,3 +37,4 @@ void GSCodeReserve::CommitMemory(size_t size)
 	pxAssert((s_memory_ptr + size) <= s_memory_end);
 	s_memory_ptr += size;
 }
+#endif // GT4GS_NO_JIT
