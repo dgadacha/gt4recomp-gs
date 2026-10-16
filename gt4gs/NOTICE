@@ -45,6 +45,8 @@ Our changes
   pcsx2/GS/Renderers/Vulkan/GSDeviceVK.cpp (the acquire after present is skipped when deferred).
 - 2026-10-16 (release 0.3.1): pcsx2-gt4gs/Main.cpp: a click on the picture no longer leaves the game window
   inactive (the GS window thread gives the foreground back to the game window; no HTTRANSPARENT).
+- 2026-10-16: gt4gs/release-local.ps1 (local build, package, source archive and publication of a release);
+  .github/workflows/gt4gs-windows.yml is manual only (no tag trigger).
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5
