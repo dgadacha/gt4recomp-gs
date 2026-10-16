@@ -81,6 +81,8 @@ Same recipe as task 036 into a fresh build directory (GT4Recomp `private/slice19
 GS stream changes 3 to 10 steps. Package `gt4-gs-0.3.0-windows-x64.zip` with `package-gt4gs.ps1 -Version 0.3.0`.
 Release 0.3.1: fresh build directory `private/slice195-gt4gs-build` for iteration; the published 0.3.1 was built
 by `release-local.ps1` from the tag checkout into `private/slice195-gt4gs-release-build` (first local release).
+Release 0.3.2 (task 047): iteration build `private/slice196-gt4gs-build`; the published 0.3.2 is built by
+`release-local.ps1` from the tag checkout into `private/slice196-gt4gs-release-build`.
 
 ## Renderers in this build
 

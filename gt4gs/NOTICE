@@ -47,6 +47,10 @@ Our changes
   inactive (the GS window thread gives the foreground back to the game window; no HTTRANSPARENT).
 - 2026-10-16: gt4gs/release-local.ps1 (local build, package, source archive and publication of a release);
   .github/workflows/gt4gs-windows.yml is manual only (no tag trigger).
+- 2026-10-16 (branch gt4gs/deinterlace, task 047, release 0.3.2): pcsx2/GSStreamReplayer.cpp presents each
+  frame with its own VSYNC record's field (GS stream protocol 1.1: the display field) instead of the previous
+  record's field; 3rdparty/gt4recomp-gs-stream/gs_stream_protocol.h updated to protocol 1.1 (MIT, by hash);
+  pcsx2-gt4gs/Main.cpp version string.
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5
