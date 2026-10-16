@@ -122,6 +122,14 @@ not import them; PCSX2 loads FFmpeg only for video capture).
 `gt4gs/check-nojit.ps1 -Path <package>` is the static check (code generator markers, writable and executable
 sections, NX flag, imports); `release-local.ps1` refuses a package that fails it.
 
+## Release 1.0.0 (tasks 060, 061, 062): the first stable release
+
+Same recipe and options as 0.4.0 (`GT4GS_ONLY=ON`, Arbitrary Code Guard on). New at configure time:
+`pcsx2-gt4gs/CMakeLists.txt` reads `3rdparty/gt4recomp-gs-stream/gs-settings-allowlist.json` (checked with the other
+vendored files against `SHA256SUMS`) with CMake's `string(JSON)` and writes `gt4gs_settings_allowlist.inc` into the
+build folder; `Main.cpp` includes it. `pdh.lib` (Windows performance counters, for the overlay's GPU usage) is linked by
+`pcsx2/GSStreamOverlay.cpp`. Released with `release-local.ps1 -Release` (a normal release, not a prerelease).
+
 ## Verifying a release
 
 1. Check the zip against `SHA256SUMS` (`sha256sum -c SHA256SUMS` on Linux or Git Bash).

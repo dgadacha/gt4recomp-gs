@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0+
 //
 // GT4Recomp fork (gt4gs/live): a CPU provider that feeds the GS from a GT4Recomp GS stream instead of a GS dump.
-// The stream is the MIT GS stream protocol 1.0 (3rdparty/gt4recomp-gs-stream/gs_stream_protocol.h): GIF transfers
-// per path, privileged register writes, VSYNC with the field bit, FIFO readbacks, resets and control messages. A
+// The stream is the MIT GS stream protocol 1.2 (3rdparty/gt4recomp-gs-stream/gs_stream_protocol.h): GIF transfers
+// per path, privileged register writes, VSYNC with the field bit, FIFO readbacks, resets and control messages; since
+// 1.2 (gt4-gs 1.0.0) also CONTROL cursor (the game window's cursor auto-hide policy) and OSD_STATS (the game's numbers
+// for the performance overlay, GSStreamOverlay.h). A
 // Source delivers the records, either live from the game's shared-memory ring or from a .gscap version 2 file; the
 // transport itself lives in the frontend (pcsx2-gt4gs), so the core library does not depend on it.
 //
@@ -66,6 +68,8 @@ namespace GSStreamReplayer
 	{
 		bool (*attach)(u64 parent_window, u32 width, u32 height) = nullptr;
 		void (*resize)(u32 width, u32 height) = nullptr;
+		// Protocol 1.2 CONTROL cursor: auto-hide flags (kCursorFlag*) and the delay without movement.
+		void (*cursor)(u64 flags, u32 hide_delay_ms) = nullptr;
 	};
 
 	// Called by the frontend before VMManager::Initialize. Takes ownership of the source.

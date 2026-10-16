@@ -28,6 +28,12 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 - Branch `gt4gs/deinterlace` (task 047): 480i deinterlacing. `gt4gs-v0.3.2` presents each frame with the field of
   its own VSYNC record (protocol 1.1, the display field); with the game's slice196, which also sends SYNCV, PCSX2's
   Automatic deinterlacing weaves the 480i menus in the right field order.
+- Branch `gt4gs/osd` (tasks 060, 061, 062): **`gt4gs-v1.0.0`, the first stable release** (not a prerelease). GS stream
+  protocol 1.2: the cursor hides over the picture after 3 s without movement with the game's policy (CONTROL cursor),
+  a plain "Compiling shaders�" notice shows in the bottom-left corner while shaders or pipelines are really compiled,
+  and an optional performance overlay (top right: FPS, frame time, CPU and GPU usage of the game, resolutions, the
+  per-part frame cost and the headroom) draws the game's OSD_STATS numbers. Settings outside the allow-list of the
+  game's settings table are ignored with a warning line instead of being applied. Same JIT-free build as 0.4.0.
 - Branch `gt4gs/nojit` (task 042): `gt4-gs.exe` contains and runs no JIT. `gt4gs-v0.4.0` is built with
   `GT4GS_ONLY=ON`: no EE/IOP/VU/VIF recompilers, no x86 emitter, no GS software JIT (the software rasterizer uses
   PCSX2's C functions), no executable memory mapping, and Windows Arbitrary Code Guard on (see "No JIT" in
@@ -55,8 +61,8 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
   that ends there (protocol 1.1; until 0.3.1 the previous record's field was used, which wove the fields in the
   wrong order once the stream marked the output as interlaced), posts the vsync (the GS thread presents) and bumps `vsyncs_done` from the GS thread
   once processed; READ_FIFO reads the GS FIFO into the response area (see Readbacks); RESET hard-resets the GS or soft-resets
-  GIF paths; CONTROL handles shutdown, attach_window, resize and snapshot (reload_config is answered
-  "unsupported"). STATS are posted every 500 vsyncs, with a console line that adds PCSX2's GS-thread and GPU
+  GIF paths; CONTROL handles shutdown, attach_window, resize, snapshot and (protocol 1.2) cursor (reload_config is
+  answered "unsupported"); OSD_STATS (protocol 1.2) feeds the performance overlay. STATS are posted every 500 vsyncs, with a console line that adds PCSX2's GS-thread and GPU
   times. The session always starts with a clean GS hard reset, never a freeze state.
 - **Readbacks (0.3.0).** `[EmuCore/GS] HWDownloadMode` selects how READ_FIFO is answered: `0` Enabled
   (accurate, default: waits for the GS thread and the GPU), `3` Unsynchronized (answered on the CPU thread from
@@ -89,6 +95,28 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
   a separate static library with C++ exceptions (PCSX2 builds without them); `pcsx2-gt4gs/StreamTransport.cpp`
   exposes them without exceptions.
 
+- **Settings (1.0.0).** Every key of `--config` is checked against the allow-list of the game repository's settings
+  table (`docs/launcher/gs-settings-allowlist.json`, vendored by hash in `3rdparty/gt4recomp-gs-stream/` and compiled
+  into a table at configure time). An unknown key, or a value outside its rule (bool and enum values, int and float
+  ranges), is ignored with one line `gt4-gs: ignoring [section] key = value in <file> (<why>)`; the session always
+  starts. `[EmuCore]` keys of the list are applied too (`EnableGameFixes`).
+- **Cursor (1.0.0, task 060).** After CONTROL attach_window a protocol 1.2 game sends CONTROL cursor (auto-hide flag,
+  delay). The window thread then samples the cursor every 100 ms and on mouse moves: over the picture (this window is
+  the one under the cursor) and without movement for the delay it hides the cursor (`SetCursor(nullptr)`, and
+  `WM_SETCURSOR` keeps it hidden); any movement shows it again; elsewhere it is never touched. The game window applies
+  the same rule to its own client area, so both processes agree. Without the record nothing changes.
+- **Overlay (1.0.0, tasks 061 and 062).** `pcsx2/GSStreamOverlay.cpp`, drawn from the ImGui OSD pass with PCSX2's OSD
+  font and margins. `[GT4GS] ShaderCompileNotice` (default true): "Compiling shaders�" in the bottom-left corner,
+  plain text, while a shader was compiled (shaderc) or a pipeline was created that the driver did not take from its
+  pipeline cache (VK_EXT_pipeline_creation_feedback cache-hit bit; without the extension every pipeline creation
+  counts), until 0.5 s after the last one. `[GT4GS] PerfOverlay` (default false) with `PerfOverlayFPS`,
+  `PerfOverlayFrameTime`, `PerfOverlayCPU`, `PerfOverlayGPU`, `PerfOverlayResolution`, `PerfOverlayBreakdown` (default
+  true each): top-right lines. FPS, frame time and the breakdown (EE, VU1 worker, GS stream write, readbacks) come from
+  the game's OSD_STATS records (READY sets `kReadyFlagOsdStats` only while the overlay is on); the GS thread time from
+  PCSX2's PerformanceMetrics; CPU usage = GetProcessTimes of the game process and gt4-gs; GPU usage = PDH
+  `\GPU Engine(*)\Utilization Percentage` of the two pids, summed per engine, busiest engine; both sampled every 0.5 s
+  on a below-normal thread. The session log ends with a `gt4-gs overlay:` line (frames drawn, mean draw time, records,
+  compiles and cache hits).
 - **No JIT (0.4.0).** The log starts with `GT4GS no-JIT: ... Arbitrary Code Guard on ...; probe RWX allocation
   refused, error 1655` and ends with `GT4GS no-JIT audit (...): N regions, 0 executable non-image regions`.
   `gt4gs/check-nojit.ps1` checks a package statically.

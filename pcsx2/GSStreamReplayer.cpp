@@ -23,7 +23,10 @@
 //              (BITBLTBUF, TRXPOS, TRXREG), which the EE side of PCSX2 captures in Gif_HandlerAD; here a small GIF tag
 //              scanner per path captures them from the A+D writes of the stream (task 037).
 //   RESET      kind 1: GS hard reset (privileged block cleared); kind 2: GIF path parsers soft reset.
-//   CONTROL    shutdown, attach_window, resize, snapshot; reload_config is answered "unsupported" (TASK-039).
+//   CONTROL    shutdown, attach_window, resize, snapshot; reload_config is answered "unsupported" (TASK-039); cursor
+//              (protocol 1.2, gt4-gs 1.0.0) hands the game's cursor auto-hide policy to the window thread (task 060).
+//   OSD_STATS  (protocol 1.2) the game's performance numbers for the overlay (GSStreamOverlay, task 062). READY asks
+//              for them (kReadyFlagOsdStats) only while the overlay is on. They never change the picture.
 //
 // The session starts with a clean GS (hard reset), never with a freeze state: a GS dump without a state makes the
 // dump replayer report "Failed to load GS state" and keep the state the GS had at open time; the stream always starts
@@ -34,6 +37,7 @@
 #include "GS.h"
 #include "GS/GS.h"
 #include "GSDumpReplayer.h"
+#include "GSStreamOverlay.h"
 #include "Gif_Unit.h"
 #include "Host.h"
 #include "MTGS.h"
@@ -52,6 +56,7 @@
 
 #include "fmt/format.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -607,6 +612,16 @@ namespace
 			case proto::ControlKind::reload_config:
 				PostError(proto::ErrorCode::unsupported_record, false, "CONTROL reload_config is not supported yet");
 				return true;
+
+			case proto::ControlKind::cursor:
+			{
+				const u32 delay_ms = static_cast<u32>(std::clamp<u64>(control.args[1], 1, 60000));
+				Console.WriteLn(fmt::format("(GSStreamReplayer) CONTROL cursor: auto-hide {}, {} ms",
+					(control.args[0] & proto::kCursorFlagAutoHide) ? "on" : "off", delay_ms));
+				if (s_source->IsLive() && s_hooks.cursor)
+					s_hooks.cursor(control.args[0], delay_ms);
+				return true;
+			}
 		}
 		PostError(proto::ErrorCode::unsupported_record, false, fmt::format("unknown CONTROL kind {}", control.kind));
 		return true;
@@ -623,11 +638,17 @@ namespace
 			case proto::RecordType::read_fifo: return DoReadFifo(record);
 			case proto::RecordType::reset: return DoReset(record);
 			case proto::RecordType::control: return DoControl(record);
+			case proto::RecordType::osd_stats:
+				// Protocol 1.2: a larger payload of a later minor version keeps the known fields at the start.
+				if (record.payload_bytes < sizeof(proto::OsdStatsPayload))
+					return false;
+				GSStreamOverlay::OnOsdStats(record.payload, sizeof(proto::OsdStatsPayload));
+				return true;
 			case proto::RecordType::state_save:
 			case proto::RecordType::state_load:
 			case proto::RecordType::aux_frame_begin:
 			case proto::RecordType::aux_frame_end:
-				PostError(proto::ErrorCode::unsupported_record, false, fmt::format("record type {} is reserved in protocol 1.0", record.type));
+				PostError(proto::ErrorCode::unsupported_record, false, fmt::format("record type {} is reserved in protocol 1.2", record.type));
 				return true;
 			default:
 				return false;
@@ -645,6 +666,8 @@ namespace
 		ready.version_minor = proto::kVersionMinor;
 		ready.consumer_pid = static_cast<u32>(GetCurrentProcessId());
 		ready.flags = proto::kReadyFlagPresents;
+		if (GSStreamOverlay::WantsOsdStats())
+			ready.flags |= proto::kReadyFlagOsdStats; // the performance overlay is on: the game sends OSD_STATS
 		std::strncpy(ready.consumer, "gt4-gs", sizeof(ready.consumer));
 		std::strncpy(ready.renderer, s_renderer_name.c_str(), sizeof(ready.renderer));
 		std::strncpy(ready.version, s_version.c_str(), sizeof(ready.version));

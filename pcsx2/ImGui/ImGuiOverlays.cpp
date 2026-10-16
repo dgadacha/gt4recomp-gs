@@ -6,6 +6,7 @@
 #include "Counters.h"
 #include "GS/GS.h"
 #include "GS/GSShaderCompileIndicator.h"
+#include "GSStreamOverlay.h"
 #include "GS/GSCapture.h"
 #include "GS/GSVector.h"
 #include "GS/Renderers/Common/GSDevice.h"
@@ -1822,6 +1823,8 @@ void ImGuiManager::RenderOverlays()
 		DrawPerformanceOverlay(position_y, scale, margin, spacing);
 	DrawSettingsOverlay(scale, margin, spacing);
 	DrawShaderCompileIndicator(scale, margin, spacing);
+	// GT4Recomp fork (gt4-gs 1.0.0): the "Compiling shaders" notice and the performance overlay of the GS stream modes.
+	GSStreamOverlay::Draw(scale, margin, spacing);
 	DrawInputsOverlay(scale, margin, spacing);
 	if (SaveStateSelectorUI::s_open)
 		SaveStateSelectorUI::Draw();

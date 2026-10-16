@@ -20,6 +20,10 @@
 // answers WM_NCHITTEST with HTTRANSPARENT: across threads that only discarded the click (after the foreground switch).
 // Folders: in the stream modes the data root is [GT4GS] DataRoot (default %LOCALAPPDATA%\GT4Recomp\gt4-gs), never the
 // PCSX2 user folder, and the [Folders] keys of the --config file (Cache, Textures, ...) are applied (task 037).
+// gt4-gs 1.0.0: the --config file is checked against the GS settings allow-list of the game repository (embedded at build
+// time): a key or value outside it is ignored with one warning line, never a refusal to start. The window thread hides
+// the cursor over the picture with the game's policy (protocol 1.2 CONTROL cursor, task 060), and GSStreamOverlay draws
+// the "Compiling shaders" notice and the performance overlay (tasks 061 and 062).
 
 #include <atomic>
 #include <chrono>
@@ -55,6 +59,7 @@
 #include "pcsx2/GS/Renderers/Common/GSDevice.h"
 #include "pcsx2/GS/GSPerfMon.h"
 #include "pcsx2/GSDumpReplayer.h"
+#include "pcsx2/GSStreamOverlay.h"
 #include "pcsx2/GSStreamReplayer.h"
 #include "pcsx2/GameList.h"
 #include "pcsx2/Host.h"
@@ -71,6 +76,7 @@
 #include "svnrev.h"
 
 #include "StreamTransport.h"
+#include "gs_stream_protocol.h"
 
 // Down here because X11 has a lot of defines that can conflict
 #if defined(__linux__)
@@ -99,6 +105,7 @@ namespace GSRunner
 	static bool PrepareStream();
 	static bool AttachToGameWindow(u64 parent_window, u32 width, u32 height);
 	static void ResizeGameChildWindow(u32 width, u32 height);
+	static void SetGameCursorPolicy(u64 flags, u32 hide_delay_ms);
 } // namespace GSRunner
 
 static constexpr u32 WINDOW_WIDTH = 640;
@@ -123,9 +130,9 @@ static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
 #ifdef GT4GS_NO_JIT
-static constexpr const char* GT4GS_VERSION = "gt4gs 0.4.0 (PCSX2 v2.8.2, no JIT)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.0 (PCSX2 v2.8.2, no JIT)";
 #else
-static constexpr const char* GT4GS_VERSION = "gt4gs 0.4.0 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.0 (PCSX2 v2.8.2)";
 #endif
 // [GT4GS] ProhibitDynamicCode (JIT-free build only, default true): Windows Arbitrary Code Guard for this process.
 static bool s_prohibit_dynamic_code = true;
@@ -652,20 +659,134 @@ namespace
 	};
 } // namespace
 
-// Reads the --config file (PCSX2 INI syntax). Copied sections: [EmuCore/GS] (GS settings) and [Folders] (cache,
-// textures, snapshots). [GT4GS] Surfaceless=true runs without a window (headless checks); DumpDir and DumpEvery write
-// frame PNGs. Other sections are ignored.
+// gt4-gs 1.0.0: the allow-list of the game repository's settings table (docs/launcher/gs-settings-allowlist.json,
+// vendored by hash and turned into this table at configure time by pcsx2-gt4gs/CMakeLists.txt).
+namespace
+{
+	struct AllowRule
+	{
+		const char* section;
+		const char* key;
+		const char* type; // bool, int, float, enum, string, path
+		const char* values; // bool and enum: accepted values, | separated
+		bool has_range; // int and float
+		double minimum;
+		double maximum;
+	};
+	constexpr AllowRule s_allow_rules[] = {
+#include "gt4gs_settings_allowlist.inc"
+	};
+
+	const AllowRule* FindAllowRule(std::string_view section, std::string_view key)
+	{
+		for (const AllowRule& rule : s_allow_rules)
+		{
+			if (section == rule.section && key == rule.key)
+				return &rule;
+		}
+		return nullptr;
+	}
+
+	// Empty when the value is accepted, otherwise why it is not.
+	std::string CheckAllowedValue(const AllowRule& rule, const std::string& value)
+	{
+		const std::string_view type = rule.type;
+		if (value.find_first_of("\r\n") != std::string::npos)
+			return "a value must be one line";
+		if (type == "bool" || type == "enum")
+		{
+			for (const std::string_view allowed : StringUtil::SplitString(rule.values, '|', false))
+			{
+				if (value == allowed)
+					return {};
+			}
+			return fmt::format("allowed values: {}", rule.values);
+		}
+		if (type == "int" || type == "float")
+		{
+			std::optional<double> number;
+			if (type == "int")
+			{
+				if (const std::optional<s64> integer = StringUtil::FromChars<s64>(value))
+					number = static_cast<double>(*integer);
+			}
+			else
+			{
+				number = StringUtil::FromChars<double>(value);
+			}
+			if (!number.has_value())
+				return fmt::format("not {} number", type == "int" ? "an integer" : "a");
+			if (rule.has_range && (*number < rule.minimum || *number > rule.maximum))
+				return fmt::format("allowed range: {:g} to {:g}", rule.minimum, rule.maximum);
+			return {};
+		}
+		return {}; // string and path: any single-line text
+	}
+
+	// Section names of an INI file in file order (INISettingsInterface cannot list them).
+	std::vector<std::string> IniSectionNames(const std::string& path)
+	{
+		std::vector<std::string> sections;
+		const std::optional<std::string> text = FileSystem::ReadFileToString(path.c_str());
+		if (!text.has_value())
+			return sections;
+		for (const std::string_view line : StringUtil::SplitString(*text, '\n', true))
+		{
+			const std::string_view trimmed = StringUtil::StripWhitespace(line);
+			if (trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']')
+			{
+				std::string name(trimmed.substr(1, trimmed.size() - 2));
+				if (std::find(sections.begin(), sections.end(), name) == sections.end())
+					sections.push_back(std::move(name));
+			}
+		}
+		return sections;
+	}
+} // namespace
+
+// Reads the --config file (PCSX2 INI syntax). gt4-gs 1.0.0: every key is checked against the allow-list first; an
+// unknown key or a value outside its rule is ignored with one warning line in the log (the session still starts).
+// Copied sections: [EmuCore/GS] (GS settings), [EmuCore] (EnableGameFixes) and [Folders] (cache, textures, snapshots).
+// [GT4GS] holds the fork's own keys: Surfaceless=true runs without a window (headless checks); DumpDir and DumpEvery
+// write frame PNGs; ShaderCompileNotice and PerfOverlay* configure GSStreamOverlay.
 bool GSRunner::ApplyGT4Config()
 {
 	if (s_config_path.empty())
+	{
+		GSStreamOverlay::Configure({}, s_stream_mode == StreamMode::Live ? s_parent_pid : 0);
 		return true;
-	INISettingsInterface ini(s_config_path);
-	if (!ini.Load())
+	}
+	INISettingsInterface file_ini(s_config_path);
+	if (!file_ini.Load())
 	{
 		Console.ErrorFmt("Unable to load settings from {}.", s_config_path);
 		return false;
 	}
-	for (const char* section : {"EmuCore/GS", "Folders"})
+	// Only accepted keys reach `ini`; everything below reads from it.
+	MemorySettingsInterface ini;
+	u32 ignored = 0;
+	for (const std::string& section : IniSectionNames(s_config_path))
+	{
+		for (const auto& [key, value] : file_ini.GetKeyValueList(section.c_str()))
+		{
+			const AllowRule* rule = FindAllowRule(section, key);
+			const std::string why = rule ? CheckAllowedValue(*rule, value) : std::string("unknown key");
+			if (!why.empty())
+			{
+				// Plain stderr: the PCSX2 console is not set up until the VM starts.
+				std::fprintf(stderr, "gt4-gs: ignoring [%s] %s = %s in %s (%s)\n", section.c_str(), key.c_str(),
+					value.c_str(), s_config_path.c_str(), why.c_str());
+				++ignored;
+				continue;
+			}
+			ini.SetStringValue(section.c_str(), key.c_str(), value.c_str());
+		}
+	}
+	if (ignored)
+		std::fprintf(stderr, "gt4-gs: %u setting(s) of %s ignored; the session starts with the others\n", ignored,
+			s_config_path.c_str());
+	std::fflush(stderr);
+	for (const char* section : {"EmuCore/GS", "EmuCore", "Folders"})
 	{
 		for (const auto& [key, value] : ini.GetKeyValueList(section))
 			s_settings_interface.SetStringValue(section, key.c_str(), value.c_str());
@@ -697,6 +818,17 @@ bool GSRunner::ApplyGT4Config()
 		s_output_prefix = Path::Combine(dump_dir, s_stream_mode == StreamMode::Live ? "live" : "replay");
 		Console.WriteLnFmt("Frame dumps: {}_frameNNNNN.png every {} vsyncs", s_output_prefix, s_dump_every);
 	}
+	// Tasks 061/062: the shader compile notice and the performance overlay (GSStreamOverlay.h).
+	GSStreamOverlay::Config overlay;
+	overlay.shader_notice = ini.GetBoolValue("GT4GS", "ShaderCompileNotice", true);
+	overlay.overlay = ini.GetBoolValue("GT4GS", "PerfOverlay", false);
+	overlay.fps = ini.GetBoolValue("GT4GS", "PerfOverlayFPS", true);
+	overlay.frame_time = ini.GetBoolValue("GT4GS", "PerfOverlayFrameTime", true);
+	overlay.cpu = ini.GetBoolValue("GT4GS", "PerfOverlayCPU", true);
+	overlay.gpu = ini.GetBoolValue("GT4GS", "PerfOverlayGPU", true);
+	overlay.resolution = ini.GetBoolValue("GT4GS", "PerfOverlayResolution", true);
+	overlay.breakdown = ini.GetBoolValue("GT4GS", "PerfOverlayBreakdown", true);
+	GSStreamOverlay::Configure(overlay, s_stream_mode == StreamMode::Live ? s_parent_pid : 0);
 	Console.WriteLnFmt("Loaded settings from {}{}", s_config_path, s_live_surfaceless ? " (surfaceless)" : "");
 	return true;
 }
@@ -758,6 +890,7 @@ bool GSRunner::PrepareStream()
 		source = new LiveSource(std::move(transport));
 		hooks.attach = &GSRunner::AttachToGameWindow;
 		hooks.resize = &GSRunner::ResizeGameChildWindow;
+		hooks.cursor = &GSRunner::SetGameCursorPolicy;
 	}
 	else
 	{
@@ -1372,6 +1505,8 @@ static void CPUThreadMain(VMBootParameters* params, std::atomic<int>* ret)
 #endif
 			VMManager::Shutdown(false);
 			GSRunner::DumpStats();
+			if (s_stream_mode != StreamMode::None)
+				Console.WriteLn(GSStreamOverlay::Summary());
 			ret->store(s_stream_mode != StreamMode::None ? GSStreamReplayer::GetExitCode() : EXIT_SUCCESS);
 		}
 		else
@@ -1440,6 +1575,7 @@ int main(int argc, char* argv[])
 	cputhread.join();
 
 	GSRunner::DestroyPlatformWindow();
+	GSStreamOverlay::Shutdown();
 
 #ifdef GT4GS_NO_JIT
 	LogExecutableMemoryAudit("at exit");
@@ -1624,11 +1760,57 @@ void GSRunner::StopPlatformMessagePump()
 static constexpr UINT GT4GS_ATTACH_MSG = WM_APP + 0x101; // wParam = parent HWND, lParam = MAKELPARAM(width, height)
 static constexpr UINT GT4GS_RESIZE_MSG = WM_APP + 0x102; // lParam = MAKELPARAM(width, height)
 static constexpr UINT GT4GS_GIVE_BACK_FOREGROUND_MSG = WM_APP + 0x103; // posted by a click on the picture
+static constexpr UINT GT4GS_CURSOR_MSG = WM_APP + 0x104; // wParam = kCursorFlag* bits, lParam = hide delay in ms
 static HANDLE s_attach_done = nullptr;
 static std::atomic<bool> s_attach_ok{false};
 
 static constexpr UINT_PTR GT4GS_STALL_TIMER = 0x4754;
+static constexpr UINT_PTR GT4GS_CURSOR_TIMER = 0x4755;
+static constexpr UINT GT4GS_CURSOR_TIMER_MS = 100;
 static bool s_input_detached = false;
+
+// Task 060 (protocol 1.2 CONTROL cursor), window thread only: the game's cursor auto-hide policy over the picture. The
+// rule is the game window's (native/cursor_autohide.hpp in the game repository): hidden after the delay without
+// movement while the cursor is over this window (the picture) and this window is the one under it; shown again on any
+// movement; never touched elsewhere. Without a CONTROL cursor record the cursor is never changed.
+static bool s_cursor_auto_hide = false;
+static u32 s_cursor_delay_ms = 3000;
+static bool s_cursor_has_sample = false;
+static bool s_cursor_hidden = false;
+static POINT s_cursor_last = {};
+static ULONGLONG s_cursor_last_move_ms = 0;
+static HCURSOR s_arrow_cursor = nullptr;
+
+static void UpdateCursor(HWND hwnd)
+{
+	POINT point{};
+	if (!s_cursor_auto_hide || !GetCursorPos(&point))
+		return;
+	const ULONGLONG now = GetTickCount64();
+	const bool moved = !s_cursor_has_sample || point.x != s_cursor_last.x || point.y != s_cursor_last.y;
+	s_cursor_has_sample = true;
+	s_cursor_last = point;
+	if (moved)
+		s_cursor_last_move_ms = now;
+	// A WS_CHILD without a border: the whole window is the picture.
+	const bool over_picture = WindowFromPoint(point) == hwnd;
+	const bool hide = !moved && over_picture && now >= s_cursor_last_move_ms && now - s_cursor_last_move_ms >= s_cursor_delay_ms;
+	if (hide && !s_cursor_hidden)
+	{
+		s_cursor_hidden = true;
+		SetCursor(nullptr);
+		std::fprintf(stderr, "gt4-gs: cursor hidden over the picture (%u ms without movement)\n", s_cursor_delay_ms);
+		std::fflush(stderr);
+	}
+	else if (!hide && s_cursor_hidden)
+	{
+		s_cursor_hidden = false;
+		if (over_picture)
+			SetCursor(s_arrow_cursor);
+		std::fprintf(stderr, "gt4-gs: cursor shown (%s)\n", over_picture ? "moved over the picture" : "left the picture");
+		std::fflush(stderr);
+	}
+}
 
 static void AttachOnWindowThread(HWND parent, int width, int height)
 {
@@ -1671,6 +1853,13 @@ bool GSRunner::AttachToGameWindow(u64 parent_window, u32 width, u32 height)
 	return s_attach_ok.load();
 }
 
+void GSRunner::SetGameCursorPolicy(u64 flags, u32 hide_delay_ms)
+{
+	// CPU thread: hand the policy to the window thread, which owns the cursor while it is over the picture.
+	if (s_hwnd)
+		PostMessageW(s_hwnd, GT4GS_CURSOR_MSG, static_cast<WPARAM>(flags), static_cast<LPARAM>(hide_delay_ms));
+}
+
 void GSRunner::ResizeGameChildWindow(u32 width, u32 height)
 {
 	// A zero size (the game window minimized) is ignored by the replayer before it gets here.
@@ -1690,7 +1879,46 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			case GT4GS_RESIZE_MSG:
 				SetWindowPos(hwnd, nullptr, 0, 0, LOWORD(lParam), HIWORD(lParam), SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
 				return 0;
+			case GT4GS_CURSOR_MSG:
+				s_cursor_auto_hide = (static_cast<u64>(wParam) & gs_stream::kCursorFlagAutoHide) != 0;
+				s_cursor_delay_ms = static_cast<u32>(std::clamp<LPARAM>(lParam, 1, 60000));
+				s_arrow_cursor = LoadCursorW(nullptr, IDC_ARROW);
+				if (s_cursor_auto_hide)
+				{
+					SetTimer(hwnd, GT4GS_CURSOR_TIMER, GT4GS_CURSOR_TIMER_MS, nullptr);
+				}
+				else
+				{
+					KillTimer(hwnd, GT4GS_CURSOR_TIMER);
+					if (s_cursor_hidden)
+					{
+						s_cursor_hidden = false;
+						POINT point{};
+						if (GetCursorPos(&point) && WindowFromPoint(point) == hwnd)
+							SetCursor(s_arrow_cursor);
+					}
+				}
+				Console.WriteLnFmt("gt4-gs: cursor auto-hide over the picture {} ({} ms without movement)",
+					s_cursor_auto_hide ? "on" : "off", s_cursor_delay_ms);
+				return 0;
+			case WM_MOUSEMOVE:
+				UpdateCursor(hwnd);
+				break;
+			case WM_SETCURSOR:
+				// With the policy on, the picture's cursor is decided here (not by the game window through DefWindowProc).
+				if (s_cursor_auto_hide && reinterpret_cast<HWND>(wParam) == hwnd && LOWORD(lParam) == HTCLIENT)
+				{
+					UpdateCursor(hwnd);
+					SetCursor(s_cursor_hidden ? nullptr : s_arrow_cursor);
+					return TRUE;
+				}
+				break;
 			case WM_TIMER:
+				if (wParam == GT4GS_CURSOR_TIMER)
+				{
+					UpdateCursor(hwnd);
+					return 0;
+				}
 				if (wParam == GT4GS_STALL_TIMER)
 				{
 					// Test only ([GT4GS] DebugStallWindowMs): the window thread stops pumping, like a hung GS window

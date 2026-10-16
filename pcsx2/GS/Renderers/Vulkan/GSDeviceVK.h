@@ -47,6 +47,7 @@ public:
 		bool vk_khr_shader_non_semantic_info : 1;
 		bool vk_ext_attachment_feedback_loop_layout : 1;
 		bool vk_ext_fragment_shader_interlock : 1;
+		bool vk_ext_pipeline_creation_feedback : 1; // GT4Recomp fork (task 061): cache hits are not "Compiling shaders"
 	};
 
 	// Global state accessors
