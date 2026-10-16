@@ -61,6 +61,16 @@ Our changes
   pcsx2/GS/Renderers/Common/GSFunctionMap.{h,cpp} (C rasterizer only), pcsx2-gt4gs/Main.cpp (Arbitrary Code
   Guard, executable memory audit, recompiler settings off, version 0.4.0); gt4gs/check-nojit.ps1;
   release-local.ps1 and the workflow build with GT4GS_ONLY=ON.
+- 2026-10-16 (branch gt4gs/osd, tasks 060, 061 and 062, release 1.0.0, the first stable release): new files
+  pcsx2/GSStreamOverlay.{h,cpp} ("Compiling shaders" notice and performance overlay drawn with the ImGui OSD;
+  CPU and GPU usage sampler); modified pcsx2/ImGui/ImGuiOverlays.cpp (calls GSStreamOverlay::Draw),
+  pcsx2/GS/GSShaderCompileIndicator.h (counts real compiles apart from pipeline cache hits),
+  pcsx2/GS/Renderers/Vulkan/VKBuilders.{h,cpp} and pcsx2/GS/Renderers/Vulkan/GSDeviceVK.{h,cpp}
+  (VK_EXT_pipeline_creation_feedback when the device has it), pcsx2/GSStreamReplayer.{h,cpp} (GS stream protocol 1.2:
+  CONTROL cursor, OSD_STATS record, READY OSD flag), pcsx2/CMakeLists.txt, pcsx2-gt4gs/Main.cpp (settings
+  allow-list: unknown keys and values are ignored with a warning; cursor auto-hide on the window thread; overlay
+  settings; version 1.0.0) and pcsx2-gt4gs/CMakeLists.txt (allow-list table generated at configure time);
+  3rdparty/gt4recomp-gs-stream updated to protocol 1.2 plus gs-settings-allowlist.json (MIT, by hash).
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5

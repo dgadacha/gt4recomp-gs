@@ -7,7 +7,44 @@
 #include "common/Assertions.h"
 #include "common/Console.h"
 
+#include <algorithm>
 #include <limits>
+
+namespace
+{
+	bool s_pipeline_creation_feedback = false;
+
+	// GT4Recomp fork (task 061): creates the pipeline(s) with VK_EXT_pipeline_creation_feedback chained in front of the
+	// create info (when enabled) and reports whether the driver took the pipeline from the pipeline cache.
+	template <typename CreateInfo, typename CreateFunction>
+	VkResult CreateWithFeedback(CreateInfo& create_info, u32 stage_count, bool* from_cache, CreateFunction create)
+	{
+		*from_cache = false;
+		if (!s_pipeline_creation_feedback)
+			return create();
+		VkPipelineCreationFeedbackEXT pipeline_feedback = {};
+		VkPipelineCreationFeedbackEXT stage_feedback[8] = {};
+		VkPipelineCreationFeedbackCreateInfoEXT feedback_info = {VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT};
+		feedback_info.pNext = create_info.pNext;
+		feedback_info.pPipelineCreationFeedback = &pipeline_feedback;
+		feedback_info.pipelineStageCreationFeedbackCount = std::min<u32>(stage_count, 8);
+		feedback_info.pPipelineStageCreationFeedbacks = stage_count ? stage_feedback : nullptr;
+		if (stage_count > 8)
+			return create(); // never happens for the GS pipelines (at most vertex, geometry, fragment)
+		const void* const saved_next = create_info.pNext;
+		create_info.pNext = &feedback_info;
+		const VkResult result = create();
+		create_info.pNext = saved_next;
+		*from_cache = (pipeline_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) &&
+		              (pipeline_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT);
+		return result;
+	}
+} // namespace
+
+void Vulkan::SetPipelineCreationFeedback(bool enabled)
+{
+	s_pipeline_creation_feedback = enabled;
+}
 
 void Vulkan::AddPointerToChain(void* head, const void* ptr)
 {
@@ -280,10 +317,11 @@ void Vulkan::GraphicsPipelineBuilder::Clear()
 VkPipeline Vulkan::GraphicsPipelineBuilder::Create(
 	VkDevice device, VkPipelineCache pipeline_cache, bool clear /* = true */)
 {
-	const GSShaderCompileIndicator::CompileTimer compile_timer;
+	GSShaderCompileIndicator::CompileTimer compile_timer;
 
 	VkPipeline pipeline;
-	VkResult res = vkCreateGraphicsPipelines(device, pipeline_cache, 1, &m_ci, nullptr, &pipeline);
+	VkResult res = CreateWithFeedback(m_ci, m_ci.stageCount, &compile_timer.from_cache,
+		[&]() { return vkCreateGraphicsPipelines(device, pipeline_cache, 1, &m_ci, nullptr, &pipeline); });
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreateGraphicsPipelines() failed: ");
@@ -591,10 +629,11 @@ void Vulkan::ComputePipelineBuilder::Clear()
 VkPipeline Vulkan::ComputePipelineBuilder::Create(
 	VkDevice device, VkPipelineCache pipeline_cache /*= VK_NULL_HANDLE*/, bool clear /*= true*/)
 {
-	const GSShaderCompileIndicator::CompileTimer compile_timer;
+	GSShaderCompileIndicator::CompileTimer compile_timer;
 
 	VkPipeline pipeline;
-	VkResult res = vkCreateComputePipelines(device, pipeline_cache, 1, &m_ci, nullptr, &pipeline);
+	VkResult res = CreateWithFeedback(m_ci, 1, &compile_timer.from_cache,
+		[&]() { return vkCreateComputePipelines(device, pipeline_cache, 1, &m_ci, nullptr, &pipeline); });
 	if (res != VK_SUCCESS)
 	{
 		LOG_VULKAN_ERROR(res, "vkCreateComputePipelines() failed: ");

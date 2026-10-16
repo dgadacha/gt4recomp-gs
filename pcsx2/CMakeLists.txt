@@ -72,6 +72,7 @@ set(pcsx2Sources
 	GS.cpp
 	GSDumpReplayer.cpp
 	GSStreamReplayer.cpp
+	GSStreamOverlay.cpp
 	Host.cpp
 	Hotkeys.cpp
 	Hw.cpp
@@ -158,6 +159,7 @@ set(pcsx2Headers
 	GS.h
 	GSDumpReplayer.h
 	GSStreamReplayer.h
+	GSStreamOverlay.h
 	Hardware.h
 	Host.h
 	Hw.h

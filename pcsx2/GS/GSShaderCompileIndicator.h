@@ -82,15 +82,43 @@ namespace GSShaderCompileIndicator
 		return 1.0f - static_cast<float>(elapsed) / static_cast<float>(hold);
 	}
 
+	// GT4Recomp fork (gt4-gs 1.0.0, task 061): compiles that really compiled: a shader compiled to SPIR-V/bytecode, or a
+	// pipeline the driver did not take from its pipeline cache (Vulkan: VK_EXT_pipeline_creation_feedback). PCSX2's own
+	// counters above are unchanged. The gt4-gs "Compiling shaders" notice shows while the last one is recent.
+	inline std::atomic<u64> s_gt4gs_last_real_compile{0}; // Common::Timer value; 0 = none yet
+	inline std::atomic<u64> s_gt4gs_real_compiles{0};
+	inline std::atomic<u64> s_gt4gs_cache_hits{0};
+
+	inline void NoteRealCompile()
+	{
+		s_gt4gs_real_compiles.fetch_add(1, std::memory_order_relaxed);
+		s_gt4gs_last_real_compile.store(Common::Timer::GetCurrentValue(), std::memory_order_relaxed);
+	}
+
+	inline bool RealCompileWithin(double seconds)
+	{
+		const u64 last = s_gt4gs_last_real_compile.load(std::memory_order_relaxed);
+		if (last == 0)
+			return false;
+		const u64 now = Common::Timer::GetCurrentValue();
+		return now <= last || Common::Timer::ConvertValueToSeconds(now - last) < seconds;
+	}
+
 	struct CompileTimer
 	{
 		Common::Timer timer;
+		// GT4Recomp fork: set by a pipeline create that the driver answered from its pipeline cache.
+		bool from_cache = false;
 
 		CompileTimer() = default;
 
 		~CompileTimer()
 		{
 			OnCompileDone(static_cast<u64>(timer.GetTimeNanoseconds()), timer.GetStartValue());
+			if (from_cache)
+				s_gt4gs_cache_hits.fetch_add(1, std::memory_order_relaxed);
+			else
+				NoteRealCompile();
 		}
 
 		CompileTimer(const CompileTimer&) = delete;

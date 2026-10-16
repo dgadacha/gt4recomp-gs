@@ -1,0 +1,647 @@
+{
+  "schema_version": 1,
+  "source": "docs/launcher/gs-settings.toml",
+  "note": "INI section/key pairs and values gt4-gs.exe accepts. gt4-gs 1.0.0 and later embed this file at build time; any other key, or a value outside its rule, is ignored with one warning line in the log. Types: bool and enum list their values; int and float give min and max; string and path take any single-line text.",
+  "entries": [
+    {
+      "section": "EmuCore",
+      "key": "EnableGameFixes",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "Adapter",
+      "type": "string"
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "AspectRatio",
+      "type": "enum",
+      "values": [
+        "16:9",
+        "4:3",
+        "Auto 4:3/3:2"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "CASMode",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "CASSharpness",
+      "type": "int",
+      "min": 0,
+      "max": 100
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "DisableMailboxPresentation",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "DisableShaderCache",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "DumpReplaceableMipmaps",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "DumpReplaceableTextures",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "DumpTexturesWithFMVActive",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "ExtendedUpscalingMultipliers",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "FMVAspectRatioSwitch",
+      "type": "enum",
+      "values": [
+        "Off",
+        "Auto 4:3/3:2",
+        "4:3",
+        "16:9",
+        "10:7"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "HWAA1",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "HWAccurateAlphaTest",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "HWDownloadMode",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "HWROV",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "IntegerScaling",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "LoadTextureReplacements",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "LoadTextureReplacementsAsync",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "MaxAnisotropy",
+      "type": "enum",
+      "values": [
+        "0",
+        "2",
+        "4",
+        "8",
+        "16"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "OsdMessagesPos",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "OsdPerformancePos",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "OsdScale",
+      "type": "int",
+      "min": 25,
+      "max": 500
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "OsdShowFPS",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "OsdShowGPU",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "OsdShowResolution",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "PrecacheTextureReplacements",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "Renderer",
+      "type": "enum",
+      "values": [
+        "14",
+        "15",
+        "3"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "ShadeBoost",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "ShadeBoost_Brightness",
+      "type": "int",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "ShadeBoost_Contrast",
+      "type": "int",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "ShadeBoost_Gamma",
+      "type": "int",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "ShadeBoost_Saturation",
+      "type": "int",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "TVShader",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "TriFilter",
+      "type": "enum",
+      "values": [
+        "-1",
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "UserHacks",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "VsyncEnable",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "accurate_blending_unit",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "deinterlace_mode",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "disable_interlace_offset",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "dithering_ps2",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "filter",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "fxaa",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "hw_mipmap",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "linear_present_mode",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "pcrtc_antiblur",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "pcrtc_offsets",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "pcrtc_overscan",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "texture_preloading",
+      "type": "enum",
+      "values": [
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    {
+      "section": "EmuCore/GS",
+      "key": "upscale_multiplier",
+      "type": "enum",
+      "values": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "6",
+        "12",
+        "5",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11"
+      ]
+    },
+    {
+      "section": "Folders",
+      "key": "Cache",
+      "type": "path"
+    },
+    {
+      "section": "GT4GS",
+      "key": "DataRoot",
+      "type": "path"
+    },
+    {
+      "section": "GT4GS",
+      "key": "DebugStallAfterMs",
+      "type": "int",
+      "min": 0,
+      "max": 600000
+    },
+    {
+      "section": "GT4GS",
+      "key": "DebugStallWindowMs",
+      "type": "int",
+      "min": 0,
+      "max": 60000
+    },
+    {
+      "section": "GT4GS",
+      "key": "DeferSwapChainAcquire",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "DumpDir",
+      "type": "path"
+    },
+    {
+      "section": "GT4GS",
+      "key": "DumpEvery",
+      "type": "int",
+      "min": 1,
+      "max": 100000
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlay",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlayBreakdown",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlayCPU",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlayFPS",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlayFrameTime",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlayGPU",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "PerfOverlayResolution",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "ProhibitDynamicCode",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "ShaderCompileNotice",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "SpinUs",
+      "type": "int",
+      "min": 0,
+      "max": 2000
+    },
+    {
+      "section": "GT4GS",
+      "key": "Surfaceless",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  ]
+}

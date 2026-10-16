@@ -23,6 +23,10 @@ namespace Vulkan
 	void AddPointerToChain(void* head, const void* ptr);
 
 	const char* VkResultToString(VkResult res);
+
+	// GT4Recomp fork (task 061): GSDeviceVK enables VK_EXT_pipeline_creation_feedback when the device has it; pipeline
+	// builders then ask the driver whether a pipeline came from the pipeline cache (not counted as a compile).
+	void SetPipelineCreationFeedback(bool enabled);
 	void LogVulkanResult(const char* func_name, VkResult res, const char* msg, ...);
 
 	class DescriptorSetLayoutBuilder

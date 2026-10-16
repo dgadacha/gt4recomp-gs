@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// GS stream protocol, version 1.1 (normative text: docs/GS-STREAM-PROTOCOL.md).
+// GS stream protocol, version 1.2 (normative text: docs/GS-STREAM-PROTOCOL.md).
 //
 // A generic stream of PlayStation 2 GS hardware traffic between a producer process (the game, which runs the EE
 // and VU code) and a consumer process (a GS renderer). The stream carries only GS hardware data: GIF packets per
@@ -27,7 +27,10 @@ namespace gs_stream {
 
 inline constexpr std::uint32_t kMagic = 0x54535347u;  // bytes 'G','S','S','T' in memory (little-endian u32)
 inline constexpr std::uint16_t kVersionMajor = 1;     // a consumer refuses a different major version
-inline constexpr std::uint16_t kVersionMinor = 1;     // a consumer accepts a producer minor >= its own minimum
+inline constexpr std::uint16_t kVersionMinor = 2;     // a consumer accepts a producer minor >= its own minimum
+// Version history: 1.0 (TASK-035), 1.1 (TASK-047: VSYNC field is the display field), 1.2 (TASK-060/062: CONTROL cursor,
+// OSD_STATS record, READY flag kReadyFlagOsdStats). A producer sends the 1.2 additions only to a consumer whose READY
+// version_minor is 2 or more.
 
 inline constexpr std::uint32_t kRecordAlign = 16;  // every record starts on a 16-byte boundary of the ring/file
 inline constexpr std::uint32_t kControlBlockBytes = 4096;
@@ -56,11 +59,13 @@ enum class RecordType : std::uint16_t {
   read_fifo = 4,  // ReadFifoPayload: local-to-host FIFO read; the reply goes to the response area
   reset = 5,      // ResetPayload: GS hard reset or GIF path reset
   control = 6,    // ControlPayload: window, snapshot, configuration and shutdown requests
-  // Reserved in version 1.0 and 1.1: a consumer answers them with ERROR (unsupported) and ignores them.
+  // Reserved in versions 1.0 to 1.2: a consumer answers them with ERROR (unsupported) and ignores them.
   state_save = 7,
   state_load = 8,
   aux_frame_begin = 9,
   aux_frame_end = 10,
+  // Version 1.2: producer performance numbers for a consumer's on-screen display (not GS traffic; never in a .gscap).
+  osd_stats = 11,  // OsdStatsPayload
 
   // Consumer (GS) -> producer (game), on the event ring.
   ready = 0x81,          // ReadyPayload: handshake accepted, the consumer processes commands from now on
@@ -160,7 +165,12 @@ enum class ControlKind : std::uint32_t {
   resize = 3,         // args: width, height of the parent client area
   reload_config = 4,  // re-read the consumer's configuration
   snapshot = 5,       // args: snapshot id, width (0 = native), height (0 = native); answered by SNAPSHOT_DONE
+  // Version 1.2: mouse cursor policy over the consumer's child window. args: flags (kCursorFlag*), hide delay in
+  // milliseconds (1..60000), 0. Without this record a consumer never changes the cursor.
+  cursor = 6,
 };
+
+inline constexpr std::uint64_t kCursorFlagAutoHide = 1u;  // hide the cursor over the picture after the delay without movement
 
 struct ControlPayload {
   std::uint32_t kind;  // ControlKind
@@ -173,6 +183,7 @@ static_assert(sizeof(ControlPayload) == 32);
 inline constexpr std::uint32_t kReadyFlagReadbacksZeroFilled = 1u;  // READ_FIFO replies are zeros (no VRAM model)
 inline constexpr std::uint32_t kReadyFlagPresents = 2u;             // the consumer presents frames itself
 inline constexpr std::uint32_t kReadyFlagRecords = 4u;              // the consumer records the stream to a file
+inline constexpr std::uint32_t kReadyFlagOsdStats = 8u;  // version 1.2: the consumer draws an OSD and wants OSD_STATS
 
 struct ReadyPayload {
   std::uint16_t version_major;  // protocol version implemented by the consumer
@@ -185,6 +196,40 @@ struct ReadyPayload {
   char version[64];   // consumer build version, NUL padded
 };
 static_assert(sizeof(ReadyPayload) == 144);
+
+// --- OSD_STATS (version 1.2) -------------------------------------------------------------------------------------
+// Producer-side performance numbers over one interval (about 0.5 s), for a consumer that draws an on-screen display.
+// Sent only to a consumer that set kReadyFlagOsdStats in READY. Times are microseconds per frame (VSYNC) averaged over
+// the interval, except the frame times. A field is meaningful only when its kOsdStat* bit is set in `valid`. The
+// record is not GS hardware traffic: a consumer MUST NOT let it change the picture, and producers do not write it to
+// .gscap files. Field meaning (the producer's own threads): main thread = the thread that posts the stream (for a game:
+// its emulation thread); worker = a second producer thread whose output the main thread waits for (for a game: a VU1
+// worker thread).
+inline constexpr std::uint32_t kOsdStatFrameTimes = 1u;      // frames, interval_us, frame_time_avg_us, frame_time_max_us
+inline constexpr std::uint32_t kOsdStatMainThreadCpu = 2u;   // main_thread_cpu_us
+inline constexpr std::uint32_t kOsdStatWorkerBusy = 4u;      // worker_busy_us
+inline constexpr std::uint32_t kOsdStatStreamCosts = 8u;     // stream_write_us, readback_wait_us, backpressure_us
+inline constexpr std::uint32_t kOsdStatWorkerWait = 16u;     // worker_wait_us
+inline constexpr std::uint32_t kOsdStatCriticalPath = 32u;   // critical_path_us, frame_budget_us
+
+struct OsdStatsPayload {
+  std::uint32_t valid;              // kOsdStat* bits
+  std::uint32_t frames;             // VSYNCs in the interval
+  std::uint64_t interval_us;        // wall time of the interval
+  std::uint32_t frame_time_avg_us;  // interval_us / frames
+  std::uint32_t frame_time_max_us;  // longest time between two VSYNC posts of the interval
+  std::uint32_t main_thread_cpu_us;   // CPU time of the producer's main thread per frame
+  std::uint32_t worker_busy_us;       // busy time of the producer's worker thread per frame
+  std::uint32_t stream_write_us;      // main thread time writing records into the command ring per frame
+  std::uint32_t readback_wait_us;     // main thread time waiting for READ_FIFO replies per frame
+  std::uint32_t backpressure_us;      // main thread time waiting for ring space or frames in flight per frame
+  std::uint32_t worker_wait_us;       // main thread time waiting for the worker per frame
+  std::uint32_t critical_path_us;     // main thread CPU + every wait above, per frame
+  std::uint32_t frame_budget_us;      // the frame period the producer paces to (16,683 us at 59.94 Hz)
+  std::uint32_t reserved[2];
+};
+static_assert(sizeof(OsdStatsPayload) == 64);
+static_assert(offsetof(OsdStatsPayload, frame_time_avg_us) == 16 && offsetof(OsdStatsPayload, frame_budget_us) == 52);
 
 // Cumulative counters since READY. A consumer posts STATS at least at every 500th VSYNC and at shutdown.
 struct StatsPayload {
