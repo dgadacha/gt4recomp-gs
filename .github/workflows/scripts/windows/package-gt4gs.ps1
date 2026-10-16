@@ -10,14 +10,14 @@ $ErrorActionPreference = 'Stop'
 $repo = (Get-Location).Path
 $name = "gt4-gs-$Version-windows-x64"
 
-$exe = Get-ChildItem -Path $Build -Recurse -Filter 'pcsx2-gsrunner.exe' | Select-Object -First 1
-if (-not $exe) { throw "pcsx2-gsrunner.exe not found under $Build" }
+$exe = Get-ChildItem -Path $Build -Recurse -Filter 'gt4-gs.exe' | Select-Object -First 1
+if (-not $exe) { throw "gt4-gs.exe (target pcsx2-gt4gs) not found under $Build" }
 
 $stage = Join-Path $OutDir $name
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-# Renamed for the package; the binary itself is the stock GSRunner (task 033).
+# Built by the pcsx2-gt4gs frontend (GSRunner plus the GT4Recomp GS stream consumer, task 036).
 Copy-Item $exe.FullName (Join-Path $stage 'gt4-gs.exe')
 
 # Runtime DLLs: those next to the built exe and the dependency bin folder.
@@ -48,7 +48,7 @@ $source = @(
     "Source ref: $ref",
     "Source commit: $commit",
     "Based on: PCSX2 tag v2.8.2, commit fd9d310ccbb6b8b62c976da8886a3c8fd3a10ff3",
-    "Binary: pcsx2-gsrunner renamed to gt4-gs.exe (no GT4 code)",
+    "Binary: gt4-gs.exe from pcsx2-gt4gs (GSRunner frontend plus the GS stream consumer; no GT4 game code)",
     "Bundled DLLs: " + ($dllNames -join ', ')
 )
 Set-Content -Path (Join-Path $stage 'SOURCE.txt') -Value $source -Encoding ASCII

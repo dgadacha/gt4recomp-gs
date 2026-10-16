@@ -19,12 +19,47 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 
 ## Status
 
-- Branch `gt4gs/main`, based on PCSX2 `v2.8.2`.
-- Current binary: the stock `pcsx2-gsrunner` built from this tree, renamed `gt4-gs.exe` in the package.
-  No GT4Recomp protocol code is in this repository yet (TASK-035 and TASK-036).
-- Changes from upstream so far are limited to `gt4gs/` (documentation and notices), the trimmed dependency
-  script `.github/workflows/scripts/windows/build-dependencies-gt4gs.bat`, the packaging script, the
-  `gt4gs-windows.yml` workflow, and upstream workflows set to manual dispatch (see `gt4gs/BUILD.md`).
+- Branch `gt4gs/main`: PCSX2 `v2.8.2` plus documentation, packaging and CI (task 033).
+- Branch `gt4gs/live` (task 036): `gt4-gs.exe` is built by the new frontend `pcsx2-gt4gs/` (from
+  `pcsx2-gsrunner`) and consumes the GT4Recomp GS stream live. Prerelease `gt4gs-v0.2.0-live`.
+
+## gt4-gs.exe
+
+```
+gt4-gs.exe --ipc <session> --parent <pid> [--config <gt4-gs.ini>]   live: started by the game
+gt4-gs.exe --replay-gscap <file.gscap> [-dumpdir <dir>] [--config <ini>]   offline replay of a stream file
+gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's GS dump replay (unchanged)
+```
+
+- **Live mode.** The game (MIT, separate process) creates a shared-memory session and starts `gt4-gs.exe`
+  in a Job Object. `gt4-gs.exe` opens the session, checks magic, protocol major version, struct sizes, region
+  layout, frames-in-flight limit, serial and that the producer pid equals `--parent`, then boots the GS
+  (no BIOS, no disc, no input, no audio, no memory cards) and posts READY. The serial from the handshake
+  (`SCUS-97328`) selects the GameDB entry, so the GT4 GS hardware fixes apply. Blending accuracy defaults to
+  High, the renderer to Vulkan, the aspect ratio to 16:9 and deinterlacing to Automatic; `--config` overrides
+  them.
+- **Records** (`pcsx2/GSStreamReplayer.cpp`, a CPU provider like the GS dump replayer): GIF chunks go to the
+  GIF unit path named in the record (PATH1/2/3) as completed GS packets; PRIV writes go to the 8 KiB
+  privileged block (CSR RESET resets the block, IMR, CSR and the GS; CSR is otherwise not stored; IMR keeps
+  its mask bits); VSYNC sets the CSR FIELD bit to the field of the previous VSYNC (PCSX2's EE swaps the field
+  after posting the vsync), posts the vsync (the GS thread presents) and bumps `vsyncs_done` from the GS thread
+  once processed; READ_FIFO reads the GS FIFO into the response area; RESET hard-resets the GS or soft-resets
+  GIF paths; CONTROL handles shutdown, attach_window, resize and snapshot (reload_config is answered
+  "unsupported"). STATS are posted every 500 vsyncs, with a console line that adds PCSX2's GS-thread and GPU
+  times. The session always starts with a clean GS hard reset, never a freeze state.
+- **Window.** A hidden, non-activating popup is created at start so the Vulkan device has a surface. On
+  CONTROL attach_window the window thread (which only pumps messages) makes it a `WS_CHILD` of the game
+  window covering its client area; it answers `WM_NCHITTEST` with `HTTRANSPARENT`, `WM_MOUSEACTIVATE` with
+  `MA_NOACTIVATE` and gives focus back to the parent. Resize follows CONTROL resize.
+- **Headless.** `[GT4GS] Surfaceless = true` runs without a window; `DumpDir` and `DumpEvery` write frame
+  PNGs named like GSRunner's `-dumpdir` (`live_frameNNNNN.png`).
+- **Protocol.** The MIT protocol header and transport are vendored unchanged in
+  `3rdparty/gt4recomp-gs-stream/` and checked against `SHA256SUMS` at configure time. They are compiled into
+  a separate static library with C++ exceptions (PCSX2 builds without them); `pcsx2-gt4gs/StreamTransport.cpp`
+  exposes them without exceptions.
+
+Changes to PCSX2 files are small and listed in `gt4gs/NOTICE` (VMManager boot hook, GSDumpReplayer hooks,
+console output to redirected handles, CMake lists).
 
 ## Build
 

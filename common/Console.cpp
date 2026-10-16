@@ -139,7 +139,18 @@ __ri void Log::WriteToConsole(LOGLEVEL level, ConsoleColors color, std::string_v
 		goto cleanup;
 
 	DWORD chars_written;
-	WriteConsoleW(hOutput, wmessage_buf, static_cast<DWORD>(wmessage_size), &chars_written, nullptr);
+	if (!WriteConsoleW(hOutput, wmessage_buf, static_cast<DWORD>(wmessage_size), &chars_written, nullptr))
+	{
+		// GT4Recomp fork: the handle is a pipe or a file (gt4-gs.exe inherits the game's redirected standard
+		// handles), so write the UTF-8 text without the colour codes.
+		SmallStackString<BUFFER_SIZE> plain;
+		if (s_log_timestamps)
+			plain.append_format(TIMESTAMP_FORMAT_STRING, Log::GetCurrentMessageTime());
+		plain.append(message);
+		plain.append('\n');
+		DWORD bytes_written;
+		WriteFile(hOutput, plain.data(), static_cast<DWORD>(plain.length()), &bytes_written, nullptr);
+	}
 
 cleanup:
 	if (wmessage_buf != wbuf)

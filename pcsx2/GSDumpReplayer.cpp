@@ -4,6 +4,7 @@
 #include "GS.h"
 #include "GS/GSLzma.h"
 #include "GSDumpReplayer.h"
+#include "GSStreamReplayer.h"
 #include "GameList.h"
 #include "Gif.h"
 #include "Gif_Unit.h"
@@ -62,7 +63,8 @@ static InterpVU1 gsDumpVU1;
 
 bool GSDumpReplayer::IsReplayingDump()
 {
-	return static_cast<bool>(s_dump_file);
+	// GT4Recomp fork: a GS stream (GSStreamReplayer) boots and runs like a dump (no BIOS, no disc).
+	return static_cast<bool>(s_dump_file) || GSStreamReplayer::IsActive();
 }
 
 bool GSDumpReplayer::IsRunner()
@@ -143,6 +145,12 @@ bool GSDumpReplayer::ChangeDump(const char* filename)
 
 void GSDumpReplayer::Shutdown()
 {
+	if (!s_dump_file && GSStreamReplayer::IsActive())
+	{
+		GSStreamReplayer::Shutdown();
+		return;
+	}
+
 	Console.WriteLn("(GSDumpReplayer) Shutting down.");
 
 	Cpu = nullptr;
@@ -155,6 +163,9 @@ void GSDumpReplayer::Shutdown()
 std::string GSDumpReplayer::GetDumpSerial()
 {
 	std::string ret;
+
+	if (!s_dump_file && GSStreamReplayer::IsActive())
+		return GSStreamReplayer::GetSerial();
 
 	if (!s_dump_file->GetSerial().empty())
 	{
@@ -175,6 +186,8 @@ std::string GSDumpReplayer::GetDumpSerial()
 
 u32 GSDumpReplayer::GetDumpCRC()
 {
+	if (!s_dump_file)
+		return 0; // GS stream: the serial alone selects the GameDB entry
 	return s_dump_file->GetCRC();
 }
 
@@ -371,6 +384,8 @@ void GSDumpReplayerCpuClear(u32 addr, u32 size)
 
 void GSDumpReplayer::RenderUI()
 {
+	if (!s_dump_file)
+		return; // GS stream: no dump overlay
 	const float scale = ImGuiManager::GetGlobalScale();
 	const float shadow_offset = std::ceil(1.0f * scale);
 	const float margin = std::ceil(GSConfig.OsdMargin * scale);

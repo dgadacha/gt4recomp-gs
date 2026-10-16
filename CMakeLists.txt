@@ -70,6 +70,11 @@ else()
 	add_subdirectory(pcsx2-gsrunner EXCLUDE_FROM_ALL)
 endif()
 
+# GT4Recomp fork: gt4-gs.exe (live GS stream consumer, GS stream file replay, GS dump replay)
+if(ENABLE_GT4GS)
+	add_subdirectory(pcsx2-gt4gs)
+endif()
+
 #-------------------------------------------------------------------------------
 if(NOT IS_SUPPORTED_COMPILER)
 	message(WARNING "
