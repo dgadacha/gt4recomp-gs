@@ -34,6 +34,10 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
   and an optional performance overlay (top right: FPS, frame time, CPU and GPU usage of the game, resolutions, the
   per-part frame cost and the headroom) draws the game's OSD_STATS numbers. Settings outside the allow-list of the
   game's settings table are ignored with a warning line instead of being applied. Same JIT-free build as 0.4.0.
+- Branch `gt4gs/datadir` (task 044 follow-up): **`gt4gs-v1.0.1`, stable.** No writes under `Documents\PCSX2`: 1.0.0 still
+  created the PCSX2 user folders and rewrote `Documents\PCSX2\logs\emulog.txt` on every session, before `[GT4GS] DataRoot`
+  was applied. From 1.0.1 the PCSX2 folders and log are set up only under the data root (stream modes), or only for the
+  GSRunner dump replay. Otherwise the same as 1.0.0 (same JIT-free build, same protocol 1.2).
 - Branch `gt4gs/nojit` (task 042): `gt4-gs.exe` contains and runs no JIT. `gt4gs-v0.4.0` is built with
   `GT4GS_ONLY=ON`: no EE/IOP/VU/VIF recompilers, no x86 emitter, no GS software JIT (the software rasterizer uses
   PCSX2's C functions), no executable memory mapping, and Windows Arbitrary Code Guard on (see "No JIT" in
@@ -73,7 +77,7 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
 - **Folders (0.3.0).** The data root is `[GT4GS] DataRoot` (default `%LOCALAPPDATA%\GT4Recomp\gt4-gs`), never
   the PCSX2 user folder, and the `[Folders]` keys of the config (`Cache`, `Textures`, ...) are applied before the
   GS opens, so the shader and pipeline caches persist where the launcher puts them. 0.2.0 ignored them and used
-  `Documents\PCSX2`. SPU2 uses the Null backend (0.2.0 opened a WASAPI stream).
+  `Documents\PCSX2` (1.0.1 no longer writes there either). SPU2 uses the Null backend (0.2.0 opened a WASAPI stream).
 - **Presentation (0.3.0).** In live mode the swap chain image for the next frame is acquired when that frame is
   presented, not right after the previous present (`[GT4GS] DeferSwapChainAcquire`, default true in live mode):
   with FIFO and two images the early acquire blocks the GS thread until the next display refresh, and a readback

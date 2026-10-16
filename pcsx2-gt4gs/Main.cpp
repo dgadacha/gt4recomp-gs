@@ -130,9 +130,9 @@ static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
 #ifdef GT4GS_NO_JIT
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.0 (PCSX2 v2.8.2, no JIT)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.1 (PCSX2 v2.8.2, no JIT)";
 #else
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.0 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.1 (PCSX2 v2.8.2)";
 #endif
 // [GT4GS] ProhibitDynamicCode (JIT-free build only, default true): Windows Arbitrary Code Guard for this process.
 static bool s_prohibit_dynamic_code = true;
@@ -220,7 +220,10 @@ bool GSRunner::InitializeConfig()
 
 	VMManager::SetDefaultSettings(si, true, true, true, true, true);
 
-	VMManager::Internal::LoadStartupSettings();
+	// GT4Recomp (gt4-gs 1.0.1): VMManager::Internal::LoadStartupSettings() creates the user folders (bios, memcards, logs,
+	// ...) and opens logs/emulog.txt under the data root. It runs in main() once the data root is known: for the
+	// stream modes that is [GT4GS] DataRoot (ApplyStreamFolders), never the PCSX2 user folder Documents\PCSX2, which
+	// 1.0.0 still created and wrote emulog.txt into.
 	return true;
 }
 
@@ -1540,6 +1543,10 @@ int main(int argc, char* argv[])
 	if (!GSRunner::ParseCommandLineArgs(argc, argv, params))
 		return EXIT_FAILURE;
 
+	// GSRunner dump replay: the PCSX2 user folders as before.
+	if (s_stream_mode == StreamMode::None)
+		VMManager::Internal::LoadStartupSettings();
+
 	// Override settings that shouldn't be picked up from defaults or INIs.
 	GSRunner::SettingsOverride();
 
@@ -1548,6 +1555,8 @@ int main(int argc, char* argv[])
 		// GT4Recomp: the config file comes after the overrides (it sets the user's GS options), then the stream opens.
 		if (!GSRunner::ApplyGT4Config() || !ApplyStreamFolders())
 			return 2;
+		// Folders and the log file under our data root only (see InitializeConfig).
+		VMManager::Internal::LoadStartupSettings();
 		if (s_stream_mode == StreamMode::Live)
 			s_use_window = !s_live_surfaceless;
 		else if (!s_use_window.has_value())

@@ -130,6 +130,13 @@ vendored files against `SHA256SUMS`) with CMake's `string(JSON)` and writes `gt4
 build folder; `Main.cpp` includes it. `pdh.lib` (Windows performance counters, for the overlay's GPU usage) is linked by
 `pcsx2/GSStreamOverlay.cpp`. Released with `release-local.ps1 -Release` (a normal release, not a prerelease).
 
+## Release 1.0.1 (task 044 follow-up): the data root only
+
+Same recipe, options and dependency script as 1.0.0 (the script hash is unchanged, so the same cached dependency
+folder can be passed with `-Deps`). The change is in `pcsx2-gt4gs/Main.cpp`: `VMManager::Internal::LoadStartupSettings()`
+no longer runs in `InitializeConfig`. It runs in `main()` after `[GT4GS] DataRoot` is applied (stream modes), or right
+after the arguments for the GSRunner dump replay. Released with `release-local.ps1 -Release`.
+
 ## Verifying a release
 
 1. Check the zip against `SHA256SUMS` (`sha256sum -c SHA256SUMS` on Linux or Git Bash).
