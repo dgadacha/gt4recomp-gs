@@ -25,6 +25,9 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 - Branch `gt4gs/window` (tasks 037 and 038): readback modes and timing, own data and cache folders, deferred swap
   chain acquire, window hardening. Prerelease `gt4gs-v0.3.0`; `gt4gs-v0.3.1` fixes a click on the picture leaving
   the game window inactive.
+- Branch `gt4gs/deinterlace` (task 047): 480i deinterlacing. `gt4gs-v0.3.2` presents each frame with the field of
+  its own VSYNC record (protocol 1.1, the display field); with the game's slice196, which also sends SYNCV, PCSX2's
+  Automatic deinterlacing weaves the 480i menus in the right field order.
 
 ## gt4-gs.exe
 
@@ -44,8 +47,9 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
 - **Records** (`pcsx2/GSStreamReplayer.cpp`, a CPU provider like the GS dump replayer): GIF chunks go to the
   GIF unit path named in the record (PATH1/2/3) as completed GS packets; PRIV writes go to the 8 KiB
   privileged block (CSR RESET resets the block, IMR, CSR and the GS; CSR is otherwise not stored; IMR keeps
-  its mask bits); VSYNC sets the CSR FIELD bit to the field of the previous VSYNC (PCSX2's EE swaps the field
-  after posting the vsync), posts the vsync (the GS thread presents) and bumps `vsyncs_done` from the GS thread
+  its mask bits); VSYNC sets the CSR FIELD bit to the record's field, which is the display field of the frame
+  that ends there (protocol 1.1; until 0.3.1 the previous record's field was used, which wove the fields in the
+  wrong order once the stream marked the output as interlaced), posts the vsync (the GS thread presents) and bumps `vsyncs_done` from the GS thread
   once processed; READ_FIFO reads the GS FIFO into the response area (see Readbacks); RESET hard-resets the GS or soft-resets
   GIF paths; CONTROL handles shutdown, attach_window, resize and snapshot (reload_config is answered
   "unsupported"). STATS are posted every 500 vsyncs, with a console line that adds PCSX2's GS-thread and GPU

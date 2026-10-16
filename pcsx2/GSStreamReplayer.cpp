@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 GT4Recomp contributors (based on GSDumpReplayer, 2002-2026 PCSX2 Dev Team)
 // SPDX-License-Identifier: GPL-3.0+
 //
-// GT4Recomp fork: executes GS stream protocol 1.0 records (see GSStreamReplayer.h) on the PCSX2 GS.
+// GT4Recomp fork: executes GS stream protocol 1.x records (see GSStreamReplayer.h) on the PCSX2 GS.
 //
 // Per record:
 //   GIF        the GIF bytes go to the GIF unit path named in the record (PATH1/2/3), as completed GS packets, like the
@@ -10,10 +10,12 @@
 //              CSR and the GS, like a CSR reset on the EE side; bits 0-4 clear interrupt flags; the value itself is not
 //              stored. IMR keeps the mask bits only. PMODE/DISPFB1/DISPFB2 writes mark "registers written" for the
 //              next VSync, as the EE GS write handler does.
-//   VSYNC      CSR FIELD is set to the field the game reported at the PREVIOUS vsync (PCSX2's EE swaps the field a few
-//              scanlines after posting the vsync, so the GS sees the field of the frame that just ended), then the
-//              vsync is posted to the GS thread, which presents. vsyncs_done is bumped on the GS thread after the
-//              vsync was processed.
+//   VSYNC      CSR FIELD is set to the record's field, the display field of the frame that ends here (protocol 1.1;
+//              1.0 producers sent the same values), then the vsync is posted to the GS thread, which presents with
+//              it (GSvsync field = !CSR.FIELD, as for PCSX2's EE). Records without a valid field alternate it.
+//              vsyncs_done is bumped on the GS thread after the vsync was processed. Until 0.3.1 the field of the
+//              PREVIOUS record was used, which wove 480i field-mode frames in the wrong order once SYNCV marked the
+//              output as interlaced (task 047, docs/GS-LIVE.md section 8 of the game repository).
 //   READ_FIFO  local-to-host read through MTGS::InitAndReadFIFO into the response area, then readback_done. The GS
 //              hardware download mode ([EmuCore/GS] HWDownloadMode) decides how: Enabled (accurate, the default) waits for
 //              the GS thread and the GPU; Unsynchronized answers on this thread from the GS local memory as it is (no GS
@@ -99,7 +101,7 @@ namespace
 	int s_exit_code = 1;
 
 	bool s_registers_written = false;
-	bool s_field_before_vsync = false; // CSR FIELD at the next PostVsyncStart (the previous VSYNC's field)
+	bool s_display_field = false; // CSR FIELD of the last VSYNC (used to alternate when a record has no valid field)
 	std::vector<u8> s_gif_parts; // GIF parts flagged MORE, joined until the last part
 	u8 s_gif_parts_path = 0;
 	std::vector<u8> s_readback_buffer;
@@ -346,7 +348,7 @@ namespace
 		std::memset(g_RealGSMem, 0, sizeof(g_RealGSMem));
 		CSRreg.Reset();
 		GSIMR.reset();
-		s_field_before_vsync = false;
+		s_display_field = false;
 		s_registers_written = false;
 		s_gif_parts.clear();
 		for (GifTransferRegisterScanner& scanner : s_transfer_scanners)
@@ -445,14 +447,14 @@ namespace
 		if (record.payload_bytes < sizeof(vsync))
 			return false;
 		std::memcpy(&vsync, record.payload, sizeof(vsync));
-		if (s_field_before_vsync)
+		s_display_field = (vsync.flags & proto::kVsyncFlagFieldValid) ? (vsync.field != 0) : !s_display_field;
+		if (s_display_field)
 			GSCSRr |= kCsrFieldBit;
 		else
 			GSCSRr &= ~kCsrFieldBit;
 		MTGS::PostVsyncStart(s_registers_written);
 		MTGS::RunOnGSThread([]() { s_gs_frames.Vsync(); });
 		s_registers_written = false;
-		s_field_before_vsync = (vsync.flags & proto::kVsyncFlagFieldValid) ? (vsync.field != 0) : !s_field_before_vsync;
 		++s_frame;
 		if (s_source->IsLive())
 		{

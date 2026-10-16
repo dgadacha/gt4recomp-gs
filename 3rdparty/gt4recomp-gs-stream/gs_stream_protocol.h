@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// GS stream protocol, version 1.0 (normative text: docs/GS-STREAM-PROTOCOL.md).
+// GS stream protocol, version 1.1 (normative text: docs/GS-STREAM-PROTOCOL.md).
 //
 // A generic stream of PlayStation 2 GS hardware traffic between a producer process (the game, which runs the EE
 // and VU code) and a consumer process (a GS renderer). The stream carries only GS hardware data: GIF packets per
@@ -27,7 +27,7 @@ namespace gs_stream {
 
 inline constexpr std::uint32_t kMagic = 0x54535347u;  // bytes 'G','S','S','T' in memory (little-endian u32)
 inline constexpr std::uint16_t kVersionMajor = 1;     // a consumer refuses a different major version
-inline constexpr std::uint16_t kVersionMinor = 0;     // a consumer accepts a producer minor >= its own minimum
+inline constexpr std::uint16_t kVersionMinor = 1;     // a consumer accepts a producer minor >= its own minimum
 
 inline constexpr std::uint32_t kRecordAlign = 16;  // every record starts on a 16-byte boundary of the ring/file
 inline constexpr std::uint32_t kControlBlockBytes = 4096;
@@ -56,7 +56,7 @@ enum class RecordType : std::uint16_t {
   read_fifo = 4,  // ReadFifoPayload: local-to-host FIFO read; the reply goes to the response area
   reset = 5,      // ResetPayload: GS hard reset or GIF path reset
   control = 6,    // ControlPayload: window, snapshot, configuration and shutdown requests
-  // Reserved in version 1.0: a consumer answers them with ERROR (unsupported) and ignores them.
+  // Reserved in version 1.0 and 1.1: a consumer answers them with ERROR (unsupported) and ignores them.
   state_save = 7,
   state_load = 8,
   aux_frame_begin = 9,
@@ -116,9 +116,11 @@ struct PrivPayload {
 static_assert(sizeof(PrivPayload) == 16);
 
 // --- VSYNC -----------------------------------------------------------------------------------------------------
-// Start of a vertical blank. Everything posted before it belongs to the frame that ends here. `field` is the CSR
-// FIELD bit (bit 13) that the producer reports to the EE after this vertical sync: 1 = odd field.
-inline constexpr std::uint32_t kVsyncFlagFieldValid = 1u;  // `field` carries the producer's field bit
+// Start of a vertical blank. Everything posted before it belongs to the frame that ends here. `field` is the display
+// field of that frame: the CSR FIELD bit (bit 13, 1 = odd) the consumer uses when it presents the frame that ends
+// here, i.e. the field the game prepared that frame's display for (version 1.1; docs/GS-STREAM-PROTOCOL.md 6.1).
+// A consumer uses it as is, without shifting it by one VSYNC.
+inline constexpr std::uint32_t kVsyncFlagFieldValid = 1u;  // `field` carries the display field
 
 struct VsyncPayload {
   std::uint64_t frame;  // 0 for the first VSYNC of the session, then +1 per VSYNC

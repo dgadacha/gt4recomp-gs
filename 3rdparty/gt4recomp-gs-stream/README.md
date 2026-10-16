@@ -1,7 +1,7 @@
 # GT4Recomp GS stream protocol (vendored, MIT)
 
 These files are copied unchanged from the GT4Recomp main repository
-(https://github.com/moesuito/gt4-staticrecomp, directory `native/gs_stream/`, commit `57d1fa5`), licensed MIT
+(https://github.com/moesuito/gt4-staticrecomp, directory `native/gs_stream/`, commit `e5ce53c`, protocol 1.1), licensed MIT
 (`LICENSE.MIT`). They are the normative protocol header and the reference shared-memory transport used between the
 game process (producer) and `gt4-gs.exe` (consumer). Specification: `docs/GS-STREAM-PROTOCOL.md` in the main
 repository.
@@ -12,7 +12,7 @@ repository.
 | `gs_stream_ipc.hpp`, `gs_stream_ipc.cpp` | named mapping, SPSC rings, wake-up events, peer-process waits |
 | `gs_stream_file.hpp`, `gs_stream_file.cpp` | `.gscap` v2 reader and writer |
 
-`SHA256SUMS` holds the SHA-256 of each copied file in its LF form, which equals `git show 57d1fa5:native/gs_stream/<file>` in
+`SHA256SUMS` holds the SHA-256 of each copied file in its LF form, which equals `git show e5ce53c:native/gs_stream/<file>` in
 the main repository; `.gitattributes` keeps LF on checkout on every platform. CMake (`pcsx2/CMakeLists.txt`) recomputes them at configure
 time and stops with an error when a file differs, so an edit here is never silent. To update: copy the files from
 the main repository, regenerate `SHA256SUMS` (`sha256sum <files> > SHA256SUMS`) and record the new commit above.

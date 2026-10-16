@@ -122,7 +122,7 @@ static std::string s_config_path;
 static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
-static constexpr const char* GT4GS_VERSION = "gt4gs 0.3.1 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 0.3.2 (PCSX2 v2.8.2)";
 static bool s_data_root_from_config = false;
 static u32 s_spin_us = 0; // [GT4GS] SpinUs: transport spin before sleeping (0: the transport default, 30 us)
 static u32 s_debug_stall_window_ms = 0; // [GT4GS] DebugStallWindowMs: test only, window thread stall after attach
