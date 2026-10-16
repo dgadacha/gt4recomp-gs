@@ -11,7 +11,11 @@
 #include <fstream>
 
 // Comment to disable all dynamic code generation.
+// GT4Recomp fork: the JIT-free gt4-gs.exe (GT4GS_NO_JIT) always uses the C functions below (CSetupPrim,
+// CDrawScanline, CDrawEdge); the code generators are not compiled.
+#ifndef GT4GS_NO_JIT
 #define ENABLE_JIT_RASTERIZER
+#endif
 
 #if MULTI_ISA_COMPILE_ONCE
 // Lack of a better home
@@ -26,6 +30,10 @@ static __forceinline const GSScanlineGlobalData& GlobalFromLocal(const GSScanlin
 	return *local.gd;
 }
 
+#ifdef GT4GS_NO_JIT
+GSDrawScanline::GSDrawScanline() = default;
+GSDrawScanline::~GSDrawScanline() = default;
+#else
 GSDrawScanline::GSDrawScanline()
 	: m_sp_map("GSSetupPrim")
 	, m_ds_map("GSDrawScanline")
@@ -38,6 +46,7 @@ GSDrawScanline::~GSDrawScanline()
 	if (const size_t used = GSCodeReserve::GetMemoryUsed(); used > 0)
 		DevCon.WriteLn("SW JIT generated %zu bytes of code", used);
 }
+#endif
 
 bool GSDrawScanline::ShouldUseCDrawScanline(u64 key)
 {
@@ -115,10 +124,12 @@ void GSDrawScanline::BeginDraw(const GSRasterizerData& data, GSScanlineLocalData
 
 void GSDrawScanline::ResetCodeCache()
 {
+#ifndef GT4GS_NO_JIT
 	Console.Warning("GS Software JIT cache overflow, resetting.");
 	m_sp_map.Clear();
 	m_ds_map.Clear();
 	GSCodeReserve::ResetMemory();
+#endif
 }
 
 bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
@@ -176,12 +187,16 @@ bool GSDrawScanline::SetupDraw(GSRasterizerData& data)
 
 void GSDrawScanline::UpdateDrawStats(u64 frame, u64 ticks, int actual, int total, int prims)
 {
+#ifndef GT4GS_NO_JIT
 	m_ds_map.UpdateStats(frame, ticks, actual, total, prims);
+#endif
 }
 
 void GSDrawScanline::PrintStats()
 {
+#ifndef GT4GS_NO_JIT
 	m_ds_map.PrintStats();
+#endif
 }
 
 #if _M_SSE >= 0x501

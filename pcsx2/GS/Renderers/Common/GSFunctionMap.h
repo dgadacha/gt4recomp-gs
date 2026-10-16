@@ -132,6 +132,8 @@ public:
 	}
 };
 
+// GT4Recomp fork: the JIT-free gt4-gs.exe (GT4GS_NO_JIT) has no GS software JIT code buffers.
+#ifndef GT4GS_NO_JIT
 // --------------------------------------------------------------------------------------
 //  GSCodeReserve
 // --------------------------------------------------------------------------------------
@@ -207,3 +209,4 @@ public:
 		return ret;
 	}
 };
+#endif // GT4GS_NO_JIT

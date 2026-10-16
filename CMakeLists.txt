@@ -38,6 +38,11 @@ detect_compiler()
 include(BuildParameters)
 include(SearchForStuff)
 
+# GT4Recomp fork: the JIT-free core cannot run games (no recompilers), so it only builds gt4-gs.exe.
+if(GT4GS_ONLY AND (NOT ENABLE_GT4GS OR ENABLE_QT_UI OR ENABLE_GSRUNNER OR ENABLE_TESTS))
+	message(FATAL_ERROR "GT4GS_ONLY needs ENABLE_GT4GS=ON, ENABLE_QT_UI=OFF, ENABLE_GSRUNNER=OFF and ENABLE_TESTS=OFF")
+endif()
+
 # Must be done after SearchForStuff
 get_git_version_info()
 write_svnrev_h()

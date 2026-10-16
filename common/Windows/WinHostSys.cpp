@@ -22,6 +22,12 @@ static DWORD ConvertToWinApi(const PageProtectionMode& mode)
 	// numbering (like flags) but is in fact not a flag value.  *Someone* from the early
 	// microsoft days wasn't a very good coder, me thinks.  --air
 
+#ifdef GT4GS_NO_JIT
+	// GT4Recomp fork, JIT-free gt4-gs.exe: executable memory is never requested; a request is a bug and stops here.
+	if (mode.CanExecute())
+		pxFailRel("GT4GS: executable memory requested in the JIT-free build");
+#endif
+
 	if (mode.CanExecute())
 	{
 		winmode = mode.CanWrite() ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ;

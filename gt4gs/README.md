@@ -28,6 +28,10 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 - Branch `gt4gs/deinterlace` (task 047): 480i deinterlacing. `gt4gs-v0.3.2` presents each frame with the field of
   its own VSYNC record (protocol 1.1, the display field); with the game's slice196, which also sends SYNCV, PCSX2's
   Automatic deinterlacing weaves the 480i menus in the right field order.
+- Branch `gt4gs/nojit` (task 042): `gt4-gs.exe` contains and runs no JIT. `gt4gs-v0.4.0` is built with
+  `GT4GS_ONLY=ON`: no EE/IOP/VU/VIF recompilers, no x86 emitter, no GS software JIT (the software rasterizer uses
+  PCSX2's C functions), no executable memory mapping, and Windows Arbitrary Code Guard on (see "No JIT" in
+  BUILD.md). The HW renderers (Vulkan, D3D11, D3D12) are unchanged; replayed frames are byte-identical to 0.3.2.
 
 ## gt4-gs.exe
 
@@ -85,8 +89,12 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
   a separate static library with C++ exceptions (PCSX2 builds without them); `pcsx2-gt4gs/StreamTransport.cpp`
   exposes them without exceptions.
 
+- **No JIT (0.4.0).** The log starts with `GT4GS no-JIT: ... Arbitrary Code Guard on ...; probe RWX allocation
+  refused, error 1655` and ends with `GT4GS no-JIT audit (...): N regions, 0 executable non-image regions`.
+  `gt4gs/check-nojit.ps1` checks a package statically.
+
 Changes to PCSX2 files are small and listed in `gt4gs/NOTICE` (VMManager boot hook, GSDumpReplayer hooks,
-console output to redirected handles, CMake lists).
+console output to redirected handles, CMake lists, the `GT4GS_ONLY` switches of 0.4.0).
 
 ## Build
 

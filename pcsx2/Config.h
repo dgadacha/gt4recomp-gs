@@ -1489,7 +1489,7 @@ namespace EmuFolders
 
 // ------------ CPU / Recompiler Options ---------------
 
-#ifdef _M_X86 // TODO: Remove me once EE/VU/IOP recs are added.
+#if defined(_M_X86) && !defined(GT4GS_NO_JIT) // TODO: Remove me once EE/VU/IOP recs are added. GT4GS_NO_JIT: GT4Recomp fork, no recompilers.
 #define REC_VU1 (EmuConfig.Cpu.Recompiler.EnableVU1)
 #define THREAD_VU1 (REC_VU1 && EmuConfig.Speedhacks.vuThread)
 #else

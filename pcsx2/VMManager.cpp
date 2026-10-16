@@ -54,7 +54,9 @@
 #include "common/StringUtil.h"
 #include "common/Threading.h"
 #include "common/Timer.h"
+#ifndef GT4GS_NO_JIT // GT4Recomp fork: no x86 emitter in the JIT-free gt4-gs.exe
 #include "common/emitter/x86emitter.h"
+#endif
 
 #include "IconsFontAwesome.h"
 #include "IconsPromptFont.h"
@@ -401,7 +403,7 @@ bool VMManager::Internal::CPUThreadInitialize()
 	if (!cpuinfo_initialize())
 		Console.Error("cpuinfo_initialize() failed.");
 
-#ifdef _M_X86
+#if defined(_M_X86) && !defined(GT4GS_NO_JIT)
 	x86Emitter::use_avx = g_cpu.vectorISA >= ProcessorFeatures::VectorISA::AVX;
 #endif
 
@@ -2670,7 +2672,7 @@ void VMManager::LogCPUCapabilities()
 
 void VMManager::InitializeCPUProviders()
 {
-#ifdef _M_X86 // TODO(Stenzek): Remove me once EE/VU/IOP recs are added.
+#if defined(_M_X86) && !defined(GT4GS_NO_JIT) // TODO(Stenzek): Remove me once EE/VU/IOP recs are added. GT4GS_NO_JIT: GT4Recomp fork, no recompilers.
 	recCpu.Reserve();
 	psxRec.Reserve();
 
@@ -2683,18 +2685,25 @@ void VMManager::InitializeCPUProviders()
 	vu1Thread.Open();
 #endif
 
+#ifdef GT4GS_NO_JIT
+	// GT4Recomp fork: no VIF unpack recompiler; VIF unpacks (never executed by the stream and dump replayers) use the
+	// interpreter loops of Vif_Unpack.cpp.
+#else
 	VifUnpackSSE_Init();
+#endif
 }
 
 void VMManager::ShutdownCPUProviders()
 {
+#ifndef GT4GS_NO_JIT
 	if (newVifDynaRec)
 	{
 		dVifRelease(1);
 		dVifRelease(0);
 	}
+#endif
 
-#ifdef _M_X86 // TODO(Stenzek): Remove me once EE/VU/IOP recs are added.
+#if defined(_M_X86) && !defined(GT4GS_NO_JIT) // TODO(Stenzek): Remove me once EE/VU/IOP recs are added. GT4GS_NO_JIT: GT4Recomp fork, no recompilers.
 	CpuMicroVU1.Shutdown();
 	CpuMicroVU0.Shutdown();
 
@@ -2719,7 +2728,7 @@ void VMManager::UpdateCPUImplementations()
 		return;
 	}
 
-#ifdef _M_X86 // TODO(Stenzek): Remove me once EE/VU/IOP recs are added.
+#if defined(_M_X86) && !defined(GT4GS_NO_JIT) // TODO(Stenzek): Remove me once EE/VU/IOP recs are added. GT4GS_NO_JIT: GT4Recomp fork, no recompilers.
 	Cpu = CHECK_EEREC ? &recCpu : &intCpu;
 	psxCpu = CHECK_IOPREC ? &psxRec : &psxInt;
 
@@ -2739,7 +2748,7 @@ void VMManager::Internal::ClearCPUExecutionCaches()
 	Cpu->Reset();
 	psxCpu->Reset();
 
-#ifdef _M_X86 // TODO(Stenzek): Remove me once EE/VU/IOP recs are added.
+#if defined(_M_X86) && !defined(GT4GS_NO_JIT) // TODO(Stenzek): Remove me once EE/VU/IOP recs are added. GT4GS_NO_JIT: GT4Recomp fork, no recompilers.
 	// mVU's VU0 needs to be properly initialized for macro mode even if it's not used for micro mode!
 	if (CHECK_EEREC && !EmuConfig.Cpu.Recompiler.EnableVU0)
 		CpuMicroVU0.Reset();

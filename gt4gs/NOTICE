@@ -51,6 +51,16 @@ Our changes
   frame with its own VSYNC record's field (GS stream protocol 1.1: the display field) instead of the previous
   record's field; 3rdparty/gt4recomp-gs-stream/gs_stream_protocol.h updated to protocol 1.1 (MIT, by hash);
   pcsx2-gt4gs/Main.cpp version string.
+- 2026-10-16 (branch gt4gs/nojit, task 042, release 0.4.0): CMake option GT4GS_ONLY (JIT-free core, macro
+  GT4GS_NO_JIT): cmake/BuildParameters.cmake, CMakeLists.txt, common/CMakeLists.txt and pcsx2/CMakeLists.txt
+  (recompilers, x86 emitter, GS software JIT generators and the xbyak include path left out); new file
+  pcsx2/GT4GSNoJit.cpp; modified pcsx2/Config.h, pcsx2/R5900OpcodeTables.cpp, pcsx2/VMManager.cpp (interpreters
+  only, no VIF unpack recompiler), pcsx2/Vif_Dynarec.h, pcsx2/Vif_Unpack.cpp and pcsx2/MTVU.cpp (VIF recompiler
+  selection at compile time), pcsx2/Memory.cpp (no code area), common/Windows/WinHostSys.cpp (executable
+  protections refused), pcsx2/GS/Renderers/SW/GSDrawScanline.{h,cpp} and
+  pcsx2/GS/Renderers/Common/GSFunctionMap.{h,cpp} (C rasterizer only), pcsx2-gt4gs/Main.cpp (Arbitrary Code
+  Guard, executable memory audit, recompiler settings off, version 0.4.0); gt4gs/check-nojit.ps1;
+  release-local.ps1 and the workflow build with GT4GS_ONLY=ON.
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5
@@ -80,7 +90,8 @@ upstream projects, pinned versions in the script) are:
 - shaderc (2026.2), glslang, SPIRV-Headers, SPIRV-Tools: Apache-2.0 (with the LLVM exception where
   applicable) and the upstream licenses of those projects
 - FFmpeg (8.1): the build uses --enable-gpl (for libx264) and libsvtav1, so the FFmpeg DLLs are
-  under GPL-2.0-or-later as a whole. This is compatible with GPL-3.0-or-later distribution.
+  under GPL-2.0-or-later as a whole. This is compatible with GPL-3.0-or-later distribution. Local
+  releases (0.3.1 and later) are built without FFmpeg and ship no FFmpeg, x264, SVT-AV1 or Opus DLLs.
 - x264 (static, in FFmpeg): GPL-2.0-or-later
 - SVT-AV1 (4.0.1): BSD-3-Clause-Clear plus the AOMedia patent license
 - Opus (1.6.1): BSD-3-Clause

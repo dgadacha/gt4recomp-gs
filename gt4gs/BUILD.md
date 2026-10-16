@@ -36,7 +36,7 @@ From the repository root, in a `cmd` shell:
 .github\workflows\scripts\windows\build-dependencies-gt4gs.bat
 call "<Visual Studio install>\VC\Auxiliary\Build\vcvars64.bat"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
-  -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DENABLE_TESTS=OFF ^
+  -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF -DENABLE_GT4GS=ON -DGT4GS_ONLY=ON -DENABLE_TESTS=OFF ^
   -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON ^
   -DCMAKE_PREFIX_PATH=%cd%\deps
 cmake --build build --target pcsx2-gt4gs --config Release
@@ -56,6 +56,10 @@ This writes `dist\gt4-gs-<ver>-windows-x64.zip` and `dist\SHA256SUMS`.
 
 The target `pcsx2-gt4gs` (option `ENABLE_GT4GS`, default OFF) builds `gt4-gs.exe`. Configure fails
 when a file in `3rdparty/gt4recomp-gs-stream/` differs from its `SHA256SUMS` entry.
+
+`GT4GS_ONLY` (default OFF; on for every release since 0.4.0) builds the JIT-free core: see "No JIT" below. It
+requires `ENABLE_GT4GS=ON`, `ENABLE_QT_UI=OFF`, `ENABLE_GSRUNNER=OFF` and `ENABLE_TESTS=OFF` (configure stops
+otherwise), because a core without recompilers cannot run games.
 
 ## Local build (owner machine, task 036)
 
@@ -83,13 +87,40 @@ Release 0.3.1: fresh build directory `private/slice195-gt4gs-build` for iteratio
 by `release-local.ps1` from the tag checkout into `private/slice195-gt4gs-release-build` (first local release).
 Release 0.3.2 (task 047): iteration build `private/slice196-gt4gs-build`; the published 0.3.2 is built by
 `release-local.ps1` from the tag checkout into `private/slice196-gt4gs-release-build`.
+Release 0.4.0 (task 042, JIT-free): iteration build `private/slice197-gt4gs-build` (`GT4GS_ONLY=ON`, 712 steps cold);
+the published 0.4.0 is built by `release-local.ps1` from the tag checkout into `private/slice197-gt4gs-release-build`.
+The local dependency build has `BUILD_FFMPEG=0`, so local release zips have no FFmpeg or x264 DLLs (gt4-gs.exe does
+not import them; PCSX2 loads FFmpeg only for video capture).
 
 ## Renderers in this build
 
 - Vulkan, D3D11 and D3D12 are compiled in on Windows. OpenGL is compiled in too (`USE_OPENGL` default ON)
   and is not offered by the GT4Recomp launcher.
-- The software renderer and the recompilers are still present in this build. Removing them is TASK-042
-  (no-JIT hardening) and is required before release 1.0.0.
+- Since 0.4.0 (`GT4GS_ONLY=ON`) there is no recompiler and no software JIT. The software rasterizer (the software
+  renderer and the HW renderer's CPU sprite and CPU CLUT render) runs the C functions of `GSDrawScanline.cpp`.
+
+## No JIT (task 042, release 0.4.0)
+
+`GT4GS_ONLY=ON` defines `GT4GS_NO_JIT` for `common` and the PCSX2 core and:
+
+- does not compile the EE and IOP recompilers, microVU (VU0/VU1), the VIF unpack recompilers (`pcsx2/x86/*`), the
+  x86 emitter (`common/emitter/*`) or the GS software JIT code generators (`GS*CodeGenerator.all.cpp`); the xbyak
+  include path is removed, so any remaining xbyak use fails to compile. `pcsx2/GT4GSNoJit.cpp` defines the two
+  recompiler entry points still named by the core (fastmem backpatch: stops the process; microVU save state block:
+  empty, as on ARM64);
+- selects the interpreters (like the ARM64 build: `REC_VU1`/`THREAD_VU1` false, interpreter opcode tables, VIF
+  unpack interpreter loops) and writes the recompiler settings off;
+- reserves no recompiler code area (`Memory.cpp`), and `HostSys` refuses any executable page protection
+  (`pxFailRel`);
+- uses the C rasterizer (`ENABLE_JIT_RASTERIZER` undefined, no code buffers);
+- enables Windows Arbitrary Code Guard (`ProcessDynamicCodePolicy`, `ProhibitDynamicCode`) in `gt4-gs.exe` before
+  the window, the VM and GS threads or the graphics driver exist, checks it with a probe allocation that must fail (error 1655), and
+  at the end of a stream and at exit walks the address space and logs the executable regions that are not part of a
+  loaded image (expected: 0). `[GT4GS] ProhibitDynamicCode = false` switches the OS enforcement off (for a graphics
+  driver that needs dynamic code in our process; the binary stays JIT-free).
+
+`gt4gs/check-nojit.ps1 -Path <package>` is the static check (code generator markers, writable and executable
+sections, NX flag, imports); `release-local.ps1` refuses a package that fails it.
 
 ## Verifying a release
 

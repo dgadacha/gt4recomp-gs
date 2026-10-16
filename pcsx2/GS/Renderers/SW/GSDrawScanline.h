@@ -5,7 +5,12 @@
 
 #include "GS/GSState.h"
 
-#ifdef ARCH_X86
+#include "GS/Renderers/SW/GSScanlineEnvironment.h"
+#include "GS/Renderers/SW/GSVertexSW.h"
+
+// GT4Recomp fork: the JIT-free gt4-gs.exe (GT4GS_NO_JIT) has no code generators; see GSDrawScanline.cpp.
+#if defined(GT4GS_NO_JIT)
+#elif defined(ARCH_X86)
 #include "GS/Renderers/SW/GSSetupPrimCodeGenerator.all.h"
 #include "GS/Renderers/SW/GSDrawScanlineCodeGenerator.all.h"
 #endif
@@ -22,8 +27,10 @@ class GSRasterizerData;
 
 class GSDrawScanline : public GSVirtualAlignedClass<32>
 {
+#ifndef GT4GS_NO_JIT
 	friend GSSetupPrimCodeGenerator;
 	friend GSDrawScanlineCodeGenerator;
+#endif
 
 public:
 	GSDrawScanline();
@@ -52,8 +59,10 @@ public:
 	void PrintStats();
 
 private:
+#ifndef GT4GS_NO_JIT
 	GSCodeGeneratorFunctionMap<GSSetupPrimCodeGenerator, u64, SetupPrimPtr> m_sp_map;
 	GSCodeGeneratorFunctionMap<GSDrawScanlineCodeGenerator, u64, DrawScanlinePtr> m_ds_map;
+#endif
 
 	static void CSetupPrim(const GSVertexSW* vertex, const u16* index, const GSVertexSW& dscan, GSScanlineLocalData& local);
 	static void CDrawScanline(int pixels, int left, int top, const GSVertexSW& scan, GSScanlineLocalData& local);

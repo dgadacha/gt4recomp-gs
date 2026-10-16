@@ -85,7 +85,12 @@ target_sources(common PRIVATE
 	YAML.h
 )
 
-if(ARCH_X86)
+# GT4Recomp fork: the x86 emitter (code generator of the PCSX2 recompilers) is not built for the JIT-free gt4-gs.exe,
+# and GT4GS_NO_JIT makes HostSys refuse executable page protections.
+if(GT4GS_ONLY)
+	target_compile_definitions(common PUBLIC GT4GS_NO_JIT=1)
+endif()
+if(ARCH_X86 AND NOT GT4GS_ONLY)
 	target_sources(common PRIVATE
 		emitter/bmi.cpp
 		emitter/fpu.cpp
