@@ -22,6 +22,9 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 - Branch `gt4gs/main`: PCSX2 `v2.8.2` plus documentation, packaging and CI (task 033).
 - Branch `gt4gs/live` (task 036): `gt4-gs.exe` is built by the new frontend `pcsx2-gt4gs/` (from
   `pcsx2-gsrunner`) and consumes the GT4Recomp GS stream live. Prerelease `gt4gs-v0.2.0-live`.
+- Branch `gt4gs/window` (tasks 037 and 038): readback modes and timing, own data and cache folders, deferred swap
+  chain acquire, window hardening. Prerelease `gt4gs-v0.3.0`; `gt4gs-v0.3.1` fixes a click on the picture leaving
+  the game window inactive.
 
 ## gt4-gs.exe
 
@@ -43,14 +46,34 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
   privileged block (CSR RESET resets the block, IMR, CSR and the GS; CSR is otherwise not stored; IMR keeps
   its mask bits); VSYNC sets the CSR FIELD bit to the field of the previous VSYNC (PCSX2's EE swaps the field
   after posting the vsync), posts the vsync (the GS thread presents) and bumps `vsyncs_done` from the GS thread
-  once processed; READ_FIFO reads the GS FIFO into the response area; RESET hard-resets the GS or soft-resets
+  once processed; READ_FIFO reads the GS FIFO into the response area (see Readbacks); RESET hard-resets the GS or soft-resets
   GIF paths; CONTROL handles shutdown, attach_window, resize and snapshot (reload_config is answered
   "unsupported"). STATS are posted every 500 vsyncs, with a console line that adds PCSX2's GS-thread and GPU
   times. The session always starts with a clean GS hard reset, never a freeze state.
+- **Readbacks (0.3.0).** `[EmuCore/GS] HWDownloadMode` selects how READ_FIFO is answered: `0` Enabled
+  (accurate, default: waits for the GS thread and the GPU), `3` Unsynchronized (answered on the CPU thread from
+  the GS local memory copy, without waiting; GPU-drawn pixels are stale, so effects that read the picture back
+  may change), `4` Disabled (zeros). Unsynchronized needs the transfer registers that PCSX2 captures on the EE
+  side; a GIF tag scanner per path captures them from the stream. Every 500 vsyncs a console line reports the
+  readback service times (count, mean, max, histogram) and the time the GS thread waited for a swap chain image.
+- **Folders (0.3.0).** The data root is `[GT4GS] DataRoot` (default `%LOCALAPPDATA%\GT4Recomp\gt4-gs`), never
+  the PCSX2 user folder, and the `[Folders]` keys of the config (`Cache`, `Textures`, ...) are applied before the
+  GS opens, so the shader and pipeline caches persist where the launcher puts them. 0.2.0 ignored them and used
+  `Documents\PCSX2`. SPU2 uses the Null backend (0.2.0 opened a WASAPI stream).
+- **Presentation (0.3.0).** In live mode the swap chain image for the next frame is acquired when that frame is
+  presented, not right after the previous present (`[GT4GS] DeferSwapChainAcquire`, default true in live mode):
+  with FIFO and two images the early acquire blocks the GS thread until the next display refresh, and a readback
+  queued behind it waits as long. `[GT4GS] SpinUs` sets the transport spin before a wait sleeps (default 30).
 - **Window.** A hidden, non-activating popup is created at start so the Vulkan device has a surface. On
   CONTROL attach_window the window thread (which only pumps messages) makes it a `WS_CHILD` of the game
-  window covering its client area; it answers `WM_NCHITTEST` with `HTTRANSPARENT`, `WM_MOUSEACTIVATE` with
-  `MA_NOACTIVATE` and gives focus back to the parent. Resize follows CONTROL resize.
+  window covering its client area and detaches its input queue from the game's window thread (0.3.0), so a
+  stalled GS window thread cannot hold up the game's input. With detached queues a click on the picture makes the GS
+  window thread the foreground thread; since 0.3.1 every click posts a message that gives the foreground back to the
+  game window (this thread received the click, so Windows allows it), `WM_MOUSEACTIVATE` returns `MA_NOACTIVATE`, and
+  the child no longer answers `HTTRANSPARENT` (across threads that only discarded the click). Focus goes back to the
+  parent. Resize follows
+  CONTROL resize; a zero size (minimized game window) is ignored. `[GT4GS] DebugStallWindowMs` and
+  `DebugStallAfterMs` stall the window thread once, for tests only.
 - **Headless.** `[GT4GS] Surfaceless = true` runs without a window; `DumpDir` and `DumpEvery` write frame
   PNGs named like GSRunner's `-dumpdir` (`live_frameNNNNN.png`).
 - **Protocol.** The MIT protocol header and transport are vendored unchanged in
@@ -64,7 +87,9 @@ console output to redirected handles, CMake lists).
 ## Build
 
 See [BUILD.md](BUILD.md). Release downloads are on the GitHub Releases page of this repository, each with
-`SHA256SUMS` and a source archive of the same tag.
+`SHA256SUMS` and a source archive of the same tag. Since 0.3.1 releases are built and published from the owner's PC
+with `gt4gs/release-local.ps1`; the GitHub Actions workflow is a manual fallback only. Anyone can rebuild a release
+from its tag with BUILD.md.
 
 ## Licensing
 

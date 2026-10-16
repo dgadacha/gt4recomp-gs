@@ -221,6 +221,11 @@ namespace gt4gs
 		std::atomic_ref<std::uint32_t>(m_impl->session->control().state).fetch_or(bits);
 	}
 
+	void LiveTransport::SetSpinUs(std::uint32_t spin_us) noexcept
+	{
+		m_impl->session->set_spin_us(spin_us);
+	}
+
 	struct FileTransport::Impl
 	{
 		proto::FileReader reader;

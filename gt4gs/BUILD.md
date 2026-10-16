@@ -1,7 +1,22 @@
 # Building gt4-gs.exe (Windows x64)
 
-This recipe is what the CI workflow `.github/workflows/gt4gs-windows.yml` runs. A local build from the same
-tag should produce the same file list; bit-identical output is a goal, recorded in the release notes.
+Releases are built and published from the owner's PC with `gt4gs/release-local.ps1` (owner decision 2026-10-16,
+see "Release flow" below). The CI workflow `.github/workflows/gt4gs-windows.yml` is a manual fallback
+(`workflow_dispatch` only) and runs the recipe below. Anyone can rebuild a release from its tag with this file; a
+build from the same tag should produce the same file list; bit-identical output is a goal, not a promise.
+
+## Release flow (local)
+
+1. Commit, tag `gt4gs-v<version>` and push the branch and the tag.
+2. Check the tag out (clean tree) and run, from the repository root:
+   `powershell -File gt4gs\release-local.ps1 -Tag gt4gs-v<version> -Build <empty build dir> -Deps <deps dir> -OutDir <empty dir>`
+   (`-Release` for a full release instead of a prerelease, `-NoPublish` to stop before publishing). For a tag made
+   before the script existed, run a copy of the script from outside the tree (`git show gt4gs/window:gt4gs/release-local.ps1`).
+3. The script refuses a dirty tree or a HEAD that is not the tag, builds `pcsx2-gt4gs` with the local recipe below,
+   packages the CI zip layout (`gt4-gs.exe`, DLLs, `resources/`, `COPYING.GPLv3`, `NOTICE`, `README.md`, `SOURCE.txt`
+   with tag, commit, compiler, CMake and Ninja versions and the dependency script hash), makes the source archive with
+   `git archive` of the tag (GPLv3 6(d)), writes `SHA256SUMS` and runs `gh release create` with the three assets.
+4. GT4Recomp pins the published zip: download it back, check it against `SHA256SUMS`, extract and pin it.
 
 ## Tool versions
 
@@ -58,6 +73,14 @@ Used for iteration on `gt4gs/live`; the CI recipe above stays the reference for 
   about 10 minutes; `gt4-gs.exe` about 9.9 MB.
 - Package with `package-gt4gs.ps1` as above. Local and CI packages are not bit-identical (different MSVC and
   LTO settings); the GT4Recomp launcher pins the exact package it uses.
+
+## Local build (task 037/038, release 0.3.0)
+
+Same recipe as task 036 into a fresh build directory (GT4Recomp `private/slice194-gt4gs-build`, dependencies of
+`private/slice193-gt4gs-deps` reused): cold build 751 steps in about 6 minutes, incremental rebuilds after the
+GS stream changes 3 to 10 steps. Package `gt4-gs-0.3.0-windows-x64.zip` with `package-gt4gs.ps1 -Version 0.3.0`.
+Release 0.3.1: fresh build directory `private/slice195-gt4gs-build` for iteration; the published 0.3.1 was built
+by `release-local.ps1` from the tag checkout into `private/slice195-gt4gs-release-build` (first local release).
 
 ## Renderers in this build
 

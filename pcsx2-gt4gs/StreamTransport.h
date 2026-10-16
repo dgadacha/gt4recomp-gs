@@ -50,6 +50,8 @@ namespace gt4gs
 		void CompleteReadback(std::uint64_t request_id, std::uint64_t bytes, std::uint32_t status) noexcept;
 		bool PostEvent(std::uint16_t type, const void* payload, std::uint32_t bytes) noexcept;
 		void SetStateBits(std::uint32_t bits) noexcept;
+		// Spin time before a wait sleeps on its event (transport default 30 us); [GT4GS] SpinUs (task 037).
+		void SetSpinUs(std::uint32_t spin_us) noexcept;
 		const std::string& LastError() const noexcept { return m_error; }
 
 	private:
