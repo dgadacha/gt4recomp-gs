@@ -3,20 +3,23 @@
 #
 # Usage (PowerShell, repository root, the release tag checked out, clean tree):
 #   powershell -File gt4gs\release-local.ps1 -Tag gt4gs-v0.3.1 -Build <build dir> -Deps <deps dir> -OutDir <dir>
-#     [-Release] [-NoPublish]
+#     [-Release] [-Draft] [-NoPublish]
 #
 # Steps: refuse a dirty tree or a HEAD that is not exactly -Tag; configure (if needed) and build pcsx2-gt4gs Release with
 # the local recipe of BUILD.md (VS Build Tools vcvars64, Ninja, no LTO, GT4GS_ONLY=ON (JIT-free, since 0.4.0), the
 # dependencies in -Deps); package the CI zip layout (gt4-gs.exe, DLLs, resources, COPYING.GPLv3, NOTICE, README.md,
 # SOURCE.txt with tag, commit and tool versions); refuse the package unless gt4gs/check-nojit.ps1 passes on it;
 # make the source archive with `git archive` of the tag (GPLv3 section 6(d)); write SHA256SUMS; publish with
-# `gh release create` (a prerelease unless -Release) with the three assets and notes. -NoPublish stops before gh.
+# `gh release create` (a prerelease unless -Release) with the three assets and notes. -Draft creates the release as a
+# draft (not public; the owner publishes it after the in-game test; the launcher ignores drafts). -NoPublish stops before
+# gh.
 param(
     [Parameter(Mandatory = $true)][string]$Tag,
     [Parameter(Mandatory = $true)][string]$Build,
     [Parameter(Mandatory = $true)][string]$Deps,
     [Parameter(Mandatory = $true)][string]$OutDir,
     [switch]$Release,
+    [switch]$Draft,
     [switch]$NoPublish
 )
 $ErrorActionPreference = 'Stop'
@@ -135,10 +138,9 @@ if (-not $gh) { $gh = 'C:\Program Files\GitHub CLI\gh.exe' }
 $origin = (git remote get-url origin).Trim()
 if ($origin -notmatch 'github\.com[:/](.+?)(\.git)?$') { throw "origin is not a GitHub repository: $origin" }
 $ghRepo = $Matches[1]
-if ($Release) {
-    & $gh release create --repo $ghRepo $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath
-} else {
-    & $gh release create --repo $ghRepo $Tag $zip $sourceZip $sumsPath --title "gt4-gs $version" --notes-file $notesPath --prerelease
-}
+$ghArgs = @('release', 'create', '--repo', $ghRepo, $Tag, $zip, $sourceZip, $sumsPath, '--title', "gt4-gs $version", '--notes-file', $notesPath)
+if (-not $Release) { $ghArgs += '--prerelease' }
+if ($Draft) { $ghArgs += '--draft' }
+& $gh @ghArgs
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
-Write-Host "Published $Tag"
+if ($Draft) { Write-Host "Created draft release $Tag (not published)" } else { Write-Host "Published $Tag" }

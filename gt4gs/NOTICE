@@ -71,6 +71,12 @@ Our changes
   allow-list: unknown keys and values are ignored with a warning; cursor auto-hide on the window thread; overlay
   settings; version 1.0.0) and pcsx2-gt4gs/CMakeLists.txt (allow-list table generated at configure time);
   3rdparty/gt4recomp-gs-stream updated to protocol 1.2 plus gs-settings-allowlist.json (MIT, by hash).
+- 2026-10-21 (branch gt4gs/aspect-crop, release 1.1.0): pcsx2-gt4gs/Main.cpp (fixed GT4 display crop right 1 and
+  bottom 1 in stream modes, the Crop* keys refused from the settings file; AspectRatio "Stretch" accepted on top of the
+  vendored allow-list; --surface-size for offline replay tests; version 1.1.0), pcsx2/GSStreamReplayer.{h,cpp}
+  (GS stream protocol 1.3: CONTROL display_aspect, READY version_minor 3),
+  pcsx2/GS/Renderers/Common/GSRenderer.cpp (Stretch fills the window exactly when a crop is set); new test tools
+  gt4gs/tests/gscap_inject_control.py and gt4gs/tests/test_display_aspect.py.
 - Later changes will be listed here with dates, in the same form.
 
 GPLv3 section 5

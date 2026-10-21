@@ -10,7 +10,7 @@ build from the same tag should produce the same file list; bit-identical output 
 1. Commit, tag `gt4gs-v<version>` and push the branch and the tag.
 2. Check the tag out (clean tree) and run, from the repository root:
    `powershell -File gt4gs\release-local.ps1 -Tag gt4gs-v<version> -Build <empty build dir> -Deps <deps dir> -OutDir <empty dir>`
-   (`-Release` for a full release instead of a prerelease, `-NoPublish` to stop before publishing). For a tag made
+   (`-Release` for a full release instead of a prerelease, `-Draft` for a draft release, `-NoPublish` to stop before publishing). For a tag made
    before the script existed, run a copy of the script from outside the tree (`git show gt4gs/window:gt4gs/release-local.ps1`).
 3. The script refuses a dirty tree or a HEAD that is not the tag, builds `pcsx2-gt4gs` with the local recipe below,
    packages the CI zip layout (`gt4-gs.exe`, DLLs, `resources/`, `COPYING.GPLv3`, `NOTICE`, `README.md`, `SOURCE.txt`
@@ -136,6 +136,20 @@ Same recipe, options and dependency script as 1.0.0 (the script hash is unchange
 folder can be passed with `-Deps`). The change is in `pcsx2-gt4gs/Main.cpp`: `VMManager::Internal::LoadStartupSettings()`
 no longer runs in `InitializeConfig`. It runs in `main()` after `[GT4GS] DataRoot` is applied (stream modes), or right
 after the arguments for the GSRunner dump replay. Released with `release-local.ps1 -Release`.
+
+## Release 1.1.0: GT4 crop, Stretch, protocol 1.3
+
+Same recipe, options and dependency script as 1.0.1 (`GT4GS_ONLY=ON`; the same cached dependency folder works with
+`-Deps`). Code changes: `pcsx2-gt4gs/Main.cpp`, `pcsx2/GSStreamReplayer.{h,cpp}`, `pcsx2/GS/Renderers/Common/GSRenderer.cpp`
+(see NOTICE). New consumer test, run against a built `gt4-gs.exe` and any `.gscap` v2 capture of at least 1,300 frames:
+
+```
+python gt4gs\tests\test_display_aspect.py --gt4gs <build>\pcsx2-gt4gs\gt4-gs.exe --gscap <capture.gscap> --work <empty dir>
+```
+
+(`gt4-gs.exe` needs the DLLs and `resources/` of a package next to it; copying the new exe into an extracted 1.0.1
+package works because the dependencies are the same.) Released as a draft with `release-local.ps1` (published by the
+owner after the in-game test).
 
 ## Verifying a release
 

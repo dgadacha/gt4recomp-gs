@@ -130,10 +130,20 @@ static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
 #ifdef GT4GS_NO_JIT
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.1 (PCSX2 v2.8.2, no JIT)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.1.0 (PCSX2 v2.8.2, no JIT)";
 #else
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.0.1 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.1.0 (PCSX2 v2.8.2)";
 #endif
+// gt4-gs 1.1.0: the GT4 display crop in native PS2 pixels (left, top, right, bottom). GT4's display rectangle ends with
+// one column and one row that are not part of the picture (a line along the right and the bottom edge at every
+// internal resolution); PCSX2's GS crop of right 1 and bottom 1 removes them and scales with the upscale. Fixed: the
+// [EmuCore/GS] Crop* keys are refused even if a later allow-list lists them (see s_fixed_keys).
+static constexpr int GT4_DISPLAY_CROP[4] = {0, 0, 1, 1};
+// --surface-size <W>x<H> (offline replay only, for tests): a surfaceless run presents into a virtual window of this size,
+// so frame dumps ([EmuCore/GS] ScreenshotSize = window resolution, the default) show the presentation rectangle (aspect,
+// pillarbox, fill) as a real window would. 0 x 0 (the default) keeps the internal-resolution dumps.
+static u32 s_surface_width = 0;
+static u32 s_surface_height = 0;
 // [GT4GS] ProhibitDynamicCode (JIT-free build only, default true): Windows Arbitrary Code Guard for this process.
 static bool s_prohibit_dynamic_code = true;
 static bool s_data_root_from_config = false;
@@ -580,6 +590,7 @@ static void PrintCommandLineHelp(const char* progname)
 	std::fprintf(stderr, "  --ipc <name> --parent <pid>: GT4Recomp live mode (GS stream shared-memory session).\n");
 	std::fprintf(stderr, "  --config <ini>: GT4Recomp settings ([EmuCore/GS], [Folders], [GT4GS] Surfaceless, DumpDir, DumpEvery).\n");
 	std::fprintf(stderr, "  --replay-gscap <file>: replays a GT4Recomp .gscap version 2 stream file.\n");
+	std::fprintf(stderr, "  --surface-size <W>x<H>: with --replay-gscap and no window: frame dumps at this virtual window size.\n");
 	std::fprintf(stderr, "  --: Signals that no more arguments will follow and the remaining\n"
 						 "    parameters make up the filename. Use when the filename contains\n"
 						 "    spaces or starts with a dash.\n");
@@ -680,6 +691,53 @@ namespace
 #include "gt4gs_settings_allowlist.inc"
 	};
 
+	// gt4-gs 1.1.0: values the fork accepts on top of the vendored allow-list (which is the game repository's file,
+	// copied unchanged). AspectRatio "Stretch" fills the window (owner request; the game repository's settings table
+	// adds it to its own list later, which makes this entry redundant, not wrong).
+	struct AllowExtension
+	{
+		const char* section;
+		const char* key;
+		const char* values; // extra accepted values, | separated
+	};
+	constexpr AllowExtension s_allow_extensions[] = {
+		{"EmuCore/GS", "AspectRatio", "Stretch"},
+	};
+
+	// Keys gt4-gs sets itself and never takes from the config file, even when an allow-list lists them.
+	struct FixedKey
+	{
+		const char* section;
+		const char* key;
+		const char* why;
+	};
+	constexpr FixedKey s_fixed_keys[] = {
+		{"EmuCore/GS", "CropLeft", "fixed by gt4-gs: the GT4 display crop"},
+		{"EmuCore/GS", "CropTop", "fixed by gt4-gs: the GT4 display crop"},
+		{"EmuCore/GS", "CropRight", "fixed by gt4-gs: the GT4 display crop"},
+		{"EmuCore/GS", "CropBottom", "fixed by gt4-gs: the GT4 display crop"},
+	};
+
+	const char* FixedKeyReason(std::string_view section, std::string_view key)
+	{
+		for (const FixedKey& fixed : s_fixed_keys)
+		{
+			if (section == fixed.section && key == fixed.key)
+				return fixed.why;
+		}
+		return nullptr;
+	}
+
+	const AllowExtension* FindAllowExtension(std::string_view section, std::string_view key)
+	{
+		for (const AllowExtension& extension : s_allow_extensions)
+		{
+			if (section == extension.section && key == extension.key)
+				return &extension;
+		}
+		return nullptr;
+	}
+
 	const AllowRule* FindAllowRule(std::string_view section, std::string_view key)
 	{
 		for (const AllowRule& rule : s_allow_rules)
@@ -702,6 +760,16 @@ namespace
 			{
 				if (value == allowed)
 					return {};
+			}
+			const AllowExtension* extension = FindAllowExtension(rule.section, rule.key);
+			if (extension)
+			{
+				for (const std::string_view allowed : StringUtil::SplitString(extension->values, '|', false))
+				{
+					if (value == allowed)
+						return {};
+				}
+				return fmt::format("allowed values: {}|{}", rule.values, extension->values);
 			}
 			return fmt::format("allowed values: {}", rule.values);
 		}
@@ -773,7 +841,8 @@ bool GSRunner::ApplyGT4Config()
 		for (const auto& [key, value] : file_ini.GetKeyValueList(section.c_str()))
 		{
 			const AllowRule* rule = FindAllowRule(section, key);
-			const std::string why = rule ? CheckAllowedValue(*rule, value) : std::string("unknown key");
+			const char* fixed = FixedKeyReason(section, key);
+			const std::string why = fixed ? std::string(fixed) : rule ? CheckAllowedValue(*rule, value) : std::string("unknown key");
 			if (!why.empty())
 			{
 				// Plain stderr: the PCSX2 console is not set up until the VM starts.
@@ -886,8 +955,9 @@ bool GSRunner::PrepareStream()
 			Console.ErrorFmt("GS stream session {} refused: {}", s_ipc_name, error);
 			return false;
 		}
-		Console.WriteLnFmt("GS stream session {}: serial {}, frames in flight {}, protocol {}", s_ipc_name,
-			transport->Serial(), transport->FramesInFlight(), gt4gs::ProtocolVersionText());
+		Console.WriteLnFmt("GS stream session {}: serial {}, frames in flight {}, protocol {} (consumer 1.{})", s_ipc_name,
+			transport->Serial(), transport->FramesInFlight(), gt4gs::ProtocolVersionText(),
+			GSStreamReplayer::Protocol13::kConsumerVersionMinor);
 		if (s_spin_us)
 			transport->SetSpinUs(s_spin_us);
 		source = new LiveSource(std::move(transport));
@@ -954,6 +1024,21 @@ bool GSRunner::ParseCommandLineArgs(int argc, char* argv[], VMBootParameters& pa
 			{
 				s_stream_mode = StreamMode::File;
 				s_gscap_path = std::string(StringUtil::StripWhitespace(argv[++i]));
+				continue;
+			}
+			else if (CHECK_ARG_PARAM("--surface-size"))
+			{
+				const std::string_view size = StringUtil::StripWhitespace(argv[++i]);
+				const size_t separator = size.find('x');
+				const std::optional<u32> width = (separator == std::string_view::npos) ? std::nullopt : StringUtil::FromChars<u32>(size.substr(0, separator));
+				const std::optional<u32> height = (separator == std::string_view::npos) ? std::nullopt : StringUtil::FromChars<u32>(size.substr(separator + 1));
+				if (!width.has_value() || !height.has_value() || *width == 0 || *height == 0 || *width > 16384 || *height > 16384)
+				{
+					Console.ErrorFmt("--surface-size {} is not <W>x<H> (1 to 16384 each).", size);
+					return false;
+				}
+				s_surface_width = *width;
+				s_surface_height = *height;
 				continue;
 			}
 			else if (CHECK_ARG("-help"))
@@ -1355,6 +1440,11 @@ void GSRunner::SettingsOverride()
 		s_settings_interface.SetIntValue("EmuCore/GS", "accurate_blending_unit", static_cast<int>(AccBlendLevel::High));
 		s_settings_interface.SetIntValue("EmuCore/GS", "deinterlace_mode", static_cast<int>(GSInterlaceMode::Automatic));
 		s_settings_interface.SetStringValue("EmuCore/GS", "AspectRatio", "16:9");
+		// gt4-gs 1.1.0: the fixed GT4 display crop (native pixels; the config file cannot change it, see s_fixed_keys).
+		s_settings_interface.SetIntValue("EmuCore/GS", "CropLeft", GT4_DISPLAY_CROP[0]);
+		s_settings_interface.SetIntValue("EmuCore/GS", "CropTop", GT4_DISPLAY_CROP[1]);
+		s_settings_interface.SetIntValue("EmuCore/GS", "CropRight", GT4_DISPLAY_CROP[2]);
+		s_settings_interface.SetIntValue("EmuCore/GS", "CropBottom", GT4_DISPLAY_CROP[3]);
 		if (s_stream_mode == StreamMode::Live)
 			s_settings_interface.SetIntValue("EmuCore/GS", "OsdMessagesPos", static_cast<int>(OsdOverlayPos::None));
 	}
@@ -1734,6 +1824,13 @@ std::optional<WindowInfo> GSRunner::GetPlatformWindowInfo()
 	else
 	{
 		wi.type = WindowInfo::Type::Surfaceless;
+		if (s_stream_mode == StreamMode::File && s_surface_width != 0)
+		{
+			// --surface-size (tests): no swap chain, but the presentation rectangle and window-size dumps use this size.
+			wi.surface_width = s_surface_width;
+			wi.surface_height = s_surface_height;
+			wi.surface_scale = 1.0f;
+		}
 	}
 
 	return wi;
