@@ -38,6 +38,10 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
   created the PCSX2 user folders and rewrote `Documents\PCSX2\logs\emulog.txt` on every session, before `[GT4GS] DataRoot`
   was applied. From 1.0.1 the PCSX2 folders and log are set up only under the data root (stream modes), or only for the
   GSRunner dump replay. Otherwise the same as 1.0.0 (same JIT-free build, same protocol 1.2).
+- Branch `gt4gs/aspect-crop`: **`gt4gs-v1.1.0`** (draft until the owner's in-game test). A fixed GT4 display crop (right 1,
+  bottom 1 native pixels, not a setting), the "Stretch" aspect ratio accepted from the settings file, and GS stream
+  protocol 1.3: CONTROL kind 7 `display_aspect` (section "Protocol 1.3" below). READY says `version_minor` 3; a 1.2 game
+  works unchanged.
 - Branch `gt4gs/nojit` (task 042): `gt4-gs.exe` contains and runs no JIT. `gt4gs-v0.4.0` is built with
   `GT4GS_ONLY=ON`: no EE/IOP/VU/VIF recompilers, no x86 emitter, no GS software JIT (the software rasterizer uses
   PCSX2's C functions), no executable memory mapping, and Windows Arbitrary Code Guard on (see "No JIT" in
@@ -47,7 +51,7 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
 
 ```
 gt4-gs.exe --ipc <session> --parent <pid> [--config <gt4-gs.ini>]   live: started by the game
-gt4-gs.exe --replay-gscap <file.gscap> [-dumpdir <dir>] [--config <ini>]   offline replay of a stream file
+gt4-gs.exe --replay-gscap <file.gscap> [-dumpdir <dir>] [--config <ini>] [--surface-size <W>x<H>]   offline replay
 gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's GS dump replay (unchanged)
 ```
 
@@ -121,9 +125,44 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
   `\GPU Engine(*)\Utilization Percentage` of the two pids, summed per engine, busiest engine; both sampled every 0.5 s
   on a below-normal thread. The session log ends with a `gt4-gs overlay:` line (frames drawn, mean draw time, records,
   compiles and cache hits).
+- **GT4 display crop (1.1.0).** In the stream modes gt4-gs always sets PCSX2's GS crop to left 0, top 0, right 1,
+  bottom 1 (`[EmuCore/GS] CropLeft/CropTop/CropRight/CropBottom`, native PS2 pixels, so it scales with the upscale):
+  GT4's display ends with a column and a row that showed as a line along the right and the bottom edge at every
+  resolution. It is not a setting: these keys are refused from `--config` with the reason "fixed by gt4-gs", even if a
+  later allow-list names them. The aspect correction accounts for the crop, so 16:9 stays 16:9.
+- **Aspect ratio and display_aspect (1.1.0).** `[EmuCore/GS] AspectRatio` accepts "Stretch" (fill the window) in
+  addition to the vendored allow-list's values (a fork-side extension in `Main.cpp`, `s_allow_extensions`, until the
+  game repository's settings table lists it). Precedence: the settings-file aspect (default 16:9) is the user's default
+  and is what mode 0 means; a protocol 1.3 CONTROL `display_aspect` record overrides it per scene while the session
+  runs (mode 1 = fill), and mode 0 returns to the settings-file aspect. Every session starts in mode 0. With Stretch the
+  picture fills the window exactly (the crop correction is not applied to Stretch, a change in `GSRenderer.cpp`).
+- **Tests (1.1.0).** `--surface-size <W>x<H>` (offline replay without a window only) gives the surfaceless device a
+  virtual window, so frame dumps (default `ScreenshotSize`, window resolution) have the presented picture's size.
+  `gt4gs/tests/gscap_inject_control.py` copies a `.gscap` v2 file and inserts synthetic CONTROL records after chosen
+  VSYNCs; `gt4gs/tests/test_display_aspect.py --gt4gs <exe> --gscap <capture> --work <empty dir>` checks
+  display_aspect (modes 0, 1, an invalid mode), the Stretch setting and the refused crop keys from dump sizes and the log.
 - **No JIT (0.4.0).** The log starts with `GT4GS no-JIT: ... Arbitrary Code Guard on ...; probe RWX allocation
   refused, error 1655` and ends with `GT4GS no-JIT audit (...): N regions, 0 executable non-image regions`.
   `gt4gs/check-nojit.ps1` checks a package statically.
+
+## Protocol 1.3 (gt4-gs 1.1.0)
+
+GS stream protocol 1.3 adds one CONTROL kind and changes nothing else (no layout or record change). The vendored MIT
+header is still the 1.2 copy; gt4-gs defines the 1.3 numbers in `pcsx2/GSStreamReplayer.h` (`Protocol13`) until the game
+repository publishes the 1.3 header.
+
+- CONTROL (record type 6) kind 7 `display_aspect`: `ControlPayload {u32 kind = 7; u32 reserved; u64 args[3]}`.
+- `args[0]` is the mode:
+  - 0 = game aspect: today's behaviour, the PS2 picture at the configured aspect (the settings file's `AspectRatio`,
+    16:9 by default), pillarboxed or letterboxed in the window;
+  - 1 = fill: the picture stretched to the whole window, for the game's ultrawide rendering;
+  - any other value: ERROR `bad_argument` (code 7), not fatal; the record is ignored and the mode is unchanged.
+- `args[1]` and `args[2]` are 0, reserved (a consumer ignores them).
+- It takes effect from the next presented frame (the change is queued on the GS thread behind every record sent before
+  it) and stays until the next `display_aspect`.
+- The default at session start is mode 0.
+- The consumer sends READY `version_minor` 3. A producer sends kind 7 only to a consumer whose READY minor is 3 or more.
+  A 1.2 producer works unchanged with a 1.3 consumer. In a `.gscap` file the record is replayed like any CONTROL record.
 
 Changes to PCSX2 files are small and listed in `gt4gs/NOTICE` (VMManager boot hook, GSDumpReplayer hooks,
 console output to redirected handles, CMake lists, the `GT4GS_ONLY` switches of 0.4.0).

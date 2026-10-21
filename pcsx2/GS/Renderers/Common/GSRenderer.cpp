@@ -341,7 +341,10 @@ static GSVector4 CalculateDrawDstRect(s32 window_width, s32 window_height, const
 		targetAr = 10.0f / 7.0f;
 	}
 
-	const float crop_adjust = (static_cast<float>(src_rect.width()) / static_cast<float>(src_size.x)) /
+	// GT4Recomp (gt4-gs 1.1.0): Stretch fills the window exactly. The crop correction keeps a fixed aspect after a
+	// crop; applied to Stretch it left a one-line gap (1079 of 1080 lines with the GT4 crop of right 1, bottom 1).
+	const float crop_adjust = (EmuConfig.CurrentAspectRatio == AspectRatioType::Stretch) ? 1.0f :
+		(static_cast<float>(src_rect.width()) / static_cast<float>(src_size.x)) /
 		(static_cast<float>(src_rect.height()) / static_cast<float>(src_size.y));
 
 	const double arr = (targetAr * crop_adjust) / clientAr;

@@ -24,7 +24,10 @@
 //              scanner per path captures them from the A+D writes of the stream (task 037).
 //   RESET      kind 1: GS hard reset (privileged block cleared); kind 2: GIF path parsers soft reset.
 //   CONTROL    shutdown, attach_window, resize, snapshot; reload_config is answered "unsupported" (TASK-039); cursor
-//              (protocol 1.2, gt4-gs 1.0.0) hands the game's cursor auto-hide policy to the window thread (task 060).
+//              (protocol 1.2, gt4-gs 1.0.0) hands the game's cursor auto-hide policy to the window thread (task 060);
+//              display_aspect (protocol 1.3, gt4-gs 1.1.0, kind 7) switches the presented picture between the configured
+//              aspect (mode 0) and fill (mode 1, PCSX2's Stretch), queued on the GS thread so it applies from the next
+//              presented frame; any other mode is answered ERROR bad_argument (not fatal) and changes nothing.
 //   OSD_STATS  (protocol 1.2) the game's performance numbers for the overlay (GSStreamOverlay, task 062). READY asks
 //              for them (kReadyFlagOsdStats) only while the overlay is on. They never change the picture.
 //
@@ -105,6 +108,7 @@ namespace
 	bool s_running = false;
 	int s_exit_code = 1;
 
+	u64 s_display_aspect_mode = GSStreamReplayer::Protocol13::kDisplayAspectGame; // protocol 1.3 CONTROL display_aspect
 	bool s_registers_written = false;
 	bool s_display_field = false; // CSR FIELD of the last VSYNC (used to alternate when a record has no valid field)
 	std::vector<u8> s_gif_parts; // GIF parts flagged MORE, joined until the last part
@@ -558,12 +562,45 @@ namespace
 		s_source->PostEvent(static_cast<u16>(proto::RecordType::snapshot_done), &done, sizeof(done));
 	}
 
+	// Protocol 1.3 CONTROL display_aspect. Mode 0 = the aspect of the settings file ([EmuCore/GS] AspectRatio, 16:9 by
+	// default: the user's default), mode 1 = fill the window (Stretch). The change is queued on the GS thread behind the
+	// records already sent, so it applies from the next presented frame and stays until the next display_aspect.
+	// EmuConfig.CurrentAspectRatio is what the presentation (CalculateDrawDstRect) reads; nothing else in gt4-gs
+	// changes it (no settings reload, no FMV switch: there is no EE).
+	void SetDisplayAspect(u64 mode)
+	{
+		s_display_aspect_mode = mode;
+		MTGS::RunOnGSThread([fill = (mode == GSStreamReplayer::Protocol13::kDisplayAspectFill)]() {
+			EmuConfig.CurrentAspectRatio = fill ? AspectRatioType::Stretch : GSConfig.AspectRatio;
+		});
+	}
+
+	void DoDisplayAspect(const proto::ControlPayload& control)
+	{
+		const u64 mode = control.args[0];
+		if (mode != GSStreamReplayer::Protocol13::kDisplayAspectGame && mode != GSStreamReplayer::Protocol13::kDisplayAspectFill)
+		{
+			PostError(static_cast<proto::ErrorCode>(GSStreamReplayer::Protocol13::kErrorCodeBadArgument), false,
+				fmt::format("CONTROL display_aspect mode {} is not 0 (game aspect) or 1 (fill); the mode stays {}", mode,
+					s_display_aspect_mode));
+			return;
+		}
+		Console.WriteLn(fmt::format("(GSStreamReplayer) CONTROL display_aspect {} ({}) from frame {}", mode,
+			mode == GSStreamReplayer::Protocol13::kDisplayAspectFill ? "fill" : "game aspect", s_frame));
+		SetDisplayAspect(mode);
+	}
+
 	bool DoControl(const GSStreamReplayer::Record& record)
 	{
 		proto::ControlPayload control;
 		if (record.payload_bytes < sizeof(control))
 			return false;
 		std::memcpy(&control, record.payload, sizeof(control));
+		if (control.kind == GSStreamReplayer::Protocol13::kControlKindDisplayAspect)
+		{
+			DoDisplayAspect(control);
+			return true;
+		}
 		switch (static_cast<proto::ControlKind>(control.kind))
 		{
 			case proto::ControlKind::shutdown:
@@ -648,7 +685,7 @@ namespace
 			case proto::RecordType::state_load:
 			case proto::RecordType::aux_frame_begin:
 			case proto::RecordType::aux_frame_end:
-				PostError(proto::ErrorCode::unsupported_record, false, fmt::format("record type {} is reserved in protocol 1.2", record.type));
+				PostError(proto::ErrorCode::unsupported_record, false, fmt::format("record type {} is reserved in protocol 1.3", record.type));
 				return true;
 			default:
 				return false;
@@ -659,11 +696,12 @@ namespace
 	{
 		s_started = true;
 		HardReset();
+		SetDisplayAspect(GSStreamReplayer::Protocol13::kDisplayAspectGame); // protocol 1.3: every session starts in mode 0
 		if (!s_source->IsLive())
 			return;
 		proto::ReadyPayload ready{};
 		ready.version_major = proto::kVersionMajor;
-		ready.version_minor = proto::kVersionMinor;
+		ready.version_minor = GSStreamReplayer::Protocol13::kConsumerVersionMinor; // 1.3 (gt4-gs 1.1.0)
 		ready.consumer_pid = static_cast<u32>(GetCurrentProcessId());
 		ready.flags = proto::kReadyFlagPresents;
 		if (GSStreamOverlay::WantsOsdStats())
