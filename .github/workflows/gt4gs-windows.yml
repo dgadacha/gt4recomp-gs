@@ -20,7 +20,7 @@ jobs:
       POWERSHELL_TELEMETRY_OPTOUT: 1
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Compute version
         id: version
@@ -36,7 +36,7 @@ jobs:
 
       - name: Cache dependencies
         id: cache-deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: deps
           key: gt4gs-win64-deps-${{ hashFiles('.github/workflows/scripts/windows/build-dependencies-gt4gs.bat', '.github/workflows/scripts/common/shaderc-changes.patch') }}
@@ -80,7 +80,7 @@ jobs:
         run: .github\workflows\scripts\windows\package-gt4gs.ps1 -Version $env:VERSION -Build build -Deps deps -OutDir dist
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gt4-gs-windows-x64
           path: dist/*
@@ -95,10 +95,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout (tag)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: gt4-gs-windows-x64
           path: dist
@@ -117,7 +117,7 @@ jobs:
           ls -l
 
       - name: Create prerelease
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: true
           files: |
