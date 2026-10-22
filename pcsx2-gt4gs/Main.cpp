@@ -130,15 +130,15 @@ static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
 #ifdef GT4GS_NO_JIT
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.1.0 (PCSX2 v2.8.2, no JIT)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.2.0 (PCSX2 v2.8.2, no JIT)";
 #else
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.1.0 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.2.0 (PCSX2 v2.8.2)";
 #endif
 // gt4-gs 1.1.0: the GT4 display crop in native PS2 pixels (left, top, right, bottom). GT4's display rectangle ends with
 // one column and one row that are not part of the picture (a line along the right and the bottom edge at every
-// internal resolution); PCSX2's GS crop of right 1 and bottom 1 removes them and scales with the upscale. Fixed: the
-// [EmuCore/GS] Crop* keys are refused even if a later allow-list lists them (see s_fixed_keys).
-static constexpr int GT4_DISPLAY_CROP[4] = {0, 0, 1, 1};
+// internal resolution). gt4-gs 1.2.0: the bottom crop is 2 rows (a second bottom row showed as a line), the right stays 1.
+// Fixed: the [EmuCore/GS] Crop* keys are refused even if a later allow-list lists them (see s_fixed_keys).
+static constexpr int GT4_DISPLAY_CROP[4] = {0, 0, 1, 2};
 // --surface-size <W>x<H> (offline replay only, for tests): a surfaceless run presents into a virtual window of this size,
 // so frame dumps ([EmuCore/GS] ScreenshotSize = window resolution, the default) show the presentation rectangle (aspect,
 // pillarbox, fill) as a real window would. 0 x 0 (the default) keeps the internal-resolution dumps.
@@ -716,6 +716,10 @@ namespace
 		{"EmuCore/GS", "CropTop", "fixed by gt4-gs: the GT4 display crop"},
 		{"EmuCore/GS", "CropRight", "fixed by gt4-gs: the GT4 display crop"},
 		{"EmuCore/GS", "CropBottom", "fixed by gt4-gs: the GT4 display crop"},
+		// gt4-gs 1.2.0: load-only. Texture dumping is not offered (see kTextureDumpingAllowed in GSTextureReplacements.h).
+		{"EmuCore/GS", "DumpReplaceableTextures", "fixed by gt4-gs: texture loading only"},
+		{"EmuCore/GS", "DumpReplaceableMipmaps", "fixed by gt4-gs: texture loading only"},
+		{"EmuCore/GS", "DumpTexturesWithFMVActive", "fixed by gt4-gs: texture loading only"},
 	};
 
 	const char* FixedKeyReason(std::string_view section, std::string_view key)
@@ -1445,6 +1449,11 @@ void GSRunner::SettingsOverride()
 		s_settings_interface.SetIntValue("EmuCore/GS", "CropTop", GT4_DISPLAY_CROP[1]);
 		s_settings_interface.SetIntValue("EmuCore/GS", "CropRight", GT4_DISPLAY_CROP[2]);
 		s_settings_interface.SetIntValue("EmuCore/GS", "CropBottom", GT4_DISPLAY_CROP[3]);
+		std::fprintf(stderr, "gt4-gs: display crop left %d top %d right %d bottom %d (native pixels)\n", GT4_DISPLAY_CROP[0], GT4_DISPLAY_CROP[1], GT4_DISPLAY_CROP[2], GT4_DISPLAY_CROP[3]);
+		// gt4-gs 1.2.0: texture loading only; dumping is off whatever the config says.
+		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpReplaceableTextures", false);
+		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpReplaceableMipmaps", false);
+		s_settings_interface.SetBoolValue("EmuCore/GS", "DumpTexturesWithFMVActive", false);
 		if (s_stream_mode == StreamMode::Live)
 			s_settings_interface.SetIntValue("EmuCore/GS", "OsdMessagesPos", static_cast<int>(OsdOverlayPos::None));
 	}
@@ -1751,7 +1760,8 @@ bool GSRunner::CreatePlatformWindow()
 	wc.hInstance = GetModuleHandle(nullptr);
 	wc.hIcon = NULL;
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+	// gt4-gs 1.2.0: black, not COLOR_WINDOW (white): the window shows black from its first frame, before the first present.
+	wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
 	wc.lpszMenuName = NULL;
 	wc.lpszClassName = WINDOW_CLASS_NAME;
 	wc.hIconSm = NULL;
@@ -2060,7 +2070,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					SetFocus(parent); // never keep the keyboard focus
 				return 0;
 			case WM_ERASEBKGND:
-				return 1; // the swap chain covers the whole client area
+			{
+				// gt4-gs 1.2.0: paint black until the swap chain presents (the GT4 start used to show white here).
+				RECT client_rect{};
+				if (GetClientRect(hwnd, &client_rect))
+					FillRect(reinterpret_cast<HDC>(wParam), &client_rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+				return 1;
+			}
 			default:
 				break;
 		}

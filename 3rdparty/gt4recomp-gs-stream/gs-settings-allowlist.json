@@ -507,6 +507,11 @@
       "type": "path"
     },
     {
+      "section": "Folders",
+      "key": "Textures",
+      "type": "path"
+    },
+    {
       "section": "GT4GS",
       "key": "DataRoot",
       "type": "path"

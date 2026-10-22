@@ -51,6 +51,12 @@ Our changes
   frame with its own VSYNC record's field (GS stream protocol 1.1: the display field) instead of the previous
   record's field; 3rdparty/gt4recomp-gs-stream/gs_stream_protocol.h updated to protocol 1.1 (MIT, by hash);
   pcsx2-gt4gs/Main.cpp version string.
+- 2026-10-21 (branch gt4gs/textures-1.2.0, release 1.2.0): pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp (the
+  replacement folder is `[Folders] Textures` itself, with no game-serial subfolder), pcsx2/GS/Renderers/HW/
+  GSTextureReplacements.h (`kTextureDumpingAllowed` = false) and pcsx2/GS/Renderers/HW/GSTextureCache.cpp (texture
+  dumping compiled out of the lookup: texture loading only). pcsx2-gt4gs/Main.cpp: the GT4 display crop bottom is 2
+  rows, the Dump* keys are refused and forced off, the window background is black (WM_ERASEBKGND and the class brush),
+  version string 1.2.0.
 - 2026-10-16 (branch gt4gs/nojit, task 042, release 0.4.0): CMake option GT4GS_ONLY (JIT-free core, macro
   GT4GS_NO_JIT): cmake/BuildParameters.cmake, CMakeLists.txt, common/CMakeLists.txt and pcsx2/CMakeLists.txt
   (recompilers, x86 emitter, GS software JIT generators and the xbyak include path left out); new file

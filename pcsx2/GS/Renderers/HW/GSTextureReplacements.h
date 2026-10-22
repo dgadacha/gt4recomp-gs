@@ -9,6 +9,10 @@
 
 namespace GSTextureReplacements
 {
+	// gt4-gs 1.2.0: GT4Recomp only loads replacement textures. Texture dumping is compiled out of the lookup
+	// (GSTextureCache::LookupHashCache); the GT4 config refuses the Dump* keys (pcsx2-gt4gs/Main.cpp).
+	inline constexpr bool kTextureDumpingAllowed = false;
+
 	struct ReplacementTexture
 	{
 		u32 width;

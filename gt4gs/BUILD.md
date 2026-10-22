@@ -164,3 +164,21 @@ The upstream PCSX2 workflows in `.github/workflows/` were changed to `workflow_d
 fork does not spend Actions minutes on PCSX2's own Linux, macOS, Qt, flatpak and cron jobs. No upstream file
 was deleted. `windows_build_qt.yml`, `linux_build_qt.yml`, `linux_build_flatpak.yml` and `macos_build.yml`
 are reusable workflows and remain callable.
+
+## Release 1.2.0 (TASK-088): custom textures, crop 2 rows, black window
+
+Same recipe, options and dependency script as 1.1.0 (`GT4GS_ONLY=ON`; the same cached dependency folder works with
+`-Deps`; the dependency script hash is unchanged). Code changes: `pcsx2-gt4gs/Main.cpp` (version string, the crop of
+2 bottom rows, the Dump* keys refused and forced off, the black window background), `pcsx2/GS/Renderers/HW/
+GSTextureReplacements.{h,cpp}` and `GSTextureCache.cpp` (replacement folder without serial, texture dumping compiled
+out of the lookup; see README "Texture replacements"). Local build directory for the test build:
+`private/slice241-gt4gs-build` (GT4Recomp checkout), dependencies `private/slice193-gt4gs-deps/root/deps`.
+
+The release is published from the owner's PC with `release-local.ps1` after the owner's in-game test. The 1.2.0 test
+package is not tagged yet, so the local script (which needs the tag checked out) was not run for it; its package layout
+and checks follow the script (zip with `gt4-gs.exe`, DLLs, `resources/`, `COPYING.GPLv3`, `NOTICE`, `README.md`,
+`SOURCE.txt`; `gt4gs/check-nojit.ps1` on the staged package).
+
+Replay check for the texture folder (headless, no window): `gt4-gs.exe --replay-gscap <capture> --config <ini>` with
+`[Folders] Textures` pointing at a scratch folder that holds `replacements\<tiny png>`; the log names the replacement
+found (`Found ... replacement`) without any serial folder.
