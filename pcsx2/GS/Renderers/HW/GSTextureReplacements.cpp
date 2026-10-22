@@ -261,7 +261,9 @@ std::optional<TextureName> GSTextureReplacements::ParseReplacementName(const std
 
 std::string GSTextureReplacements::GetGameTextureDirectory()
 {
-	return Path::Combine(EmuFolders::Textures, s_current_serial);
+	// gt4-gs 1.2.0: the GT4Recomp texture folder has no game-serial subfolder. The user's pack lives in
+	// [Folders] Textures\replacements directly (PCSX2 normally uses Textures\<serial>\replacements).
+	return EmuFolders::Textures;
 }
 
 std::string GSTextureReplacements::GetDumpFilename(const TextureName& name, u32 level)
@@ -400,9 +402,8 @@ void GSTextureReplacements::ReloadReplacementMap()
 	// For some reason texture pack authors think it's a good idea to rename the replacements directory to something with the wrong case...
 	std::string wrong_case_path;
 	const std::string* right_case_path = nullptr;
-	if (GetWrongCasePath(&wrong_case_path, EmuFolders::Textures.c_str(), s_current_serial, &files))
-		right_case_path = &texture_dir;
-	else if (GetWrongCasePath(&wrong_case_path, texture_dir.c_str(), TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME, &files))
+	// gt4-gs 1.2.0: the serial folder check is gone (no serial subfolder); only the replacements folder case is checked.
+	if (GetWrongCasePath(&wrong_case_path, texture_dir.c_str(), TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME, &files))
 		right_case_path = &replacement_dir;
 	if (right_case_path)
 	{
@@ -414,7 +415,11 @@ void GSTextureReplacements::ReloadReplacementMap()
 	}
 
 	if (!FileSystem::FindFiles(replacement_dir.c_str(), "*", FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES | FILESYSTEM_FIND_RECURSIVE, &files))
+	{
+		// gt4-gs 1.2.0: the same console line as a load with files, so a missing folder is visible in the log.
+		Console.WriteLn("gt4-gs textures: 0 replacement(s) in %s", replacement_dir.c_str());
 		return;
+	}
 
 	std::string filename;
 	for (FILESYSTEM_FIND_DATA& fd : files)
@@ -437,6 +442,9 @@ void GSTextureReplacements::ReloadReplacementMap()
 		s_replacement_textures_without_clut_hash.insert(name.value());
 	}
 
+	// gt4-gs 1.2.0: one console line per load, so the folder that was read is visible in the log (checked by the
+	// texture test in gt4gs/tests).
+	Console.WriteLn("gt4-gs textures: %u replacement(s) in %s", static_cast<u32>(s_replacement_texture_filenames.size()), replacement_dir.c_str());
 	if (!s_replacement_texture_filenames.empty())
 	{
 		if (GSConfig.PrecacheTextureReplacements)
