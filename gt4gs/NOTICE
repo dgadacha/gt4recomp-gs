@@ -51,6 +51,10 @@ Our changes
   frame with its own VSYNC record's field (GS stream protocol 1.1: the display field) instead of the previous
   record's field; 3rdparty/gt4recomp-gs-stream/gs_stream_protocol.h updated to protocol 1.1 (MIT, by hash);
   pcsx2-gt4gs/Main.cpp version string.
+- 2026-10-22 (branch gt4gs/textures-root-1.2.1, release 1.2.1): pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp (the
+  replacement search root is `[Folders] Textures` itself, recursive; the serial-folder and case-mismatch checks removed;
+  `GetDumpFilename` and `DumpTexture` never create or write a dump folder while `kTextureDumpingAllowed` is false),
+  pcsx2-gt4gs/Main.cpp (version string 1.2.1).
 - 2026-10-21 (branch gt4gs/textures-1.2.0, release 1.2.0): pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp (the
   replacement folder is `[Folders] Textures` itself, with no game-serial subfolder), pcsx2/GS/Renderers/HW/
   GSTextureReplacements.h (`kTextureDumpingAllowed` = false) and pcsx2/GS/Renderers/HW/GSTextureCache.cpp (texture

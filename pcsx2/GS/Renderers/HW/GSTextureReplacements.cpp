@@ -261,31 +261,23 @@ std::optional<TextureName> GSTextureReplacements::ParseReplacementName(const std
 
 std::string GSTextureReplacements::GetGameTextureDirectory()
 {
-	// gt4-gs 1.2.0: the GT4Recomp texture folder has no game-serial subfolder. The user's pack lives in
-	// [Folders] Textures\replacements directly (PCSX2 normally uses Textures\<serial>\replacements).
+	// gt4-gs 1.2.1: the replacement search root is the [Folders] Textures folder itself, searched recursively to any
+	// depth. PCSX2 normally uses Textures\<serial>\replacements; no serial folder is used, and the older layout
+	// Textures\replacements is just one more subfolder of the search.
 	return EmuFolders::Textures;
 }
 
 std::string GSTextureReplacements::GetDumpFilename(const TextureName& name, u32 level)
 {
 	std::string ret;
-	if (s_current_serial.empty())
+	// gt4-gs 1.2.1: dumping is off (kTextureDumpingAllowed). A dump folder would be <Textures>\dumps, inside the
+	// replacement search root, so a dumped texture would be read back as a replacement. Nothing is created here and an
+	// empty name means "do not dump". Re-enabling dumping needs a dump folder outside the search root first.
+	if (!kTextureDumpingAllowed || s_current_serial.empty())
 		return ret;
 
 	const std::string game_dir(GetGameTextureDirectory());
 	const std::string game_subdir(Path::Combine(game_dir, TEXTURE_DUMP_SUBDIRECTORY_NAME));
-
-	if (!FileSystem::DirectoryExists(game_subdir.c_str()))
-	{
-		// create both dumps and replacements
-		if (!FileSystem::CreateDirectoryPath(game_dir.c_str(), false) ||
-			!FileSystem::EnsureDirectoryExists(game_subdir.c_str(), false) ||
-			!FileSystem::EnsureDirectoryExists(Path::Combine(game_dir, TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME).c_str(), false))
-		{
-			// if it fails to create, we're not going to be able to use it anyway
-			return ret;
-		}
-	}
 
 	std::string filename;
 	if (name.HasRegion())
@@ -353,28 +345,6 @@ void GSTextureReplacements::GameChanged()
 	ClearDumpedTextureList();
 }
 
-/// If the given file exists in the given directory, but with a different case than the original file, write its path to `*output` and return true.
-static bool GetWrongCasePath(std::string* output, const char* dir, std::string_view file, FileSystem::FindResultsArray* reuseme)
-{
-	if (FileSystem::FindFiles(dir, "*", FILESYSTEM_FIND_FOLDERS | FILESYSTEM_FIND_HIDDEN_FILES, reuseme))
-	{
-		for (const FILESYSTEM_FIND_DATA& fd : *reuseme)
-		{
-			std::string_view name = Path::GetFileName(fd.FileName);
-			if (name.size() != file.size())
-				continue;
-			if (0 == strncmp(name.data(), file.data(), name.size()))
-				continue;
-			if (0 == StringUtil::Strncasecmp(name.data(), file.data(), name.size()))
-			{
-				*output = fd.FileName;
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
 void GSTextureReplacements::ReloadReplacementMap()
 {
 	SyncWorkerThread();
@@ -394,30 +364,17 @@ void GSTextureReplacements::ReloadReplacementMap()
 	if (s_current_serial.empty() || !GSConfig.LoadTextureReplacements)
 		return;
 
-	const std::string texture_dir = GetGameTextureDirectory();
-	const std::string replacement_dir(Path::Combine(texture_dir, TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME));
+	// gt4-gs 1.2.1: the search root is the texture folder itself, recursively. Every file of any depth under it with a
+	// loader extension and a PCSX2 replacement name is a replacement. Nothing gt4-gs writes lands under this folder
+	// (dumping is off), so no dump or cache file is read back. The serial-folder and case-mismatch checks are gone:
+	// the search does not depend on the names of the folders in between.
+	const std::string search_root = GetGameTextureDirectory();
 
 	FileSystem::FindResultsArray files;
-
-	// For some reason texture pack authors think it's a good idea to rename the replacements directory to something with the wrong case...
-	std::string wrong_case_path;
-	const std::string* right_case_path = nullptr;
-	// gt4-gs 1.2.0: the serial folder check is gone (no serial subfolder); only the replacements folder case is checked.
-	if (GetWrongCasePath(&wrong_case_path, texture_dir.c_str(), TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME, &files))
-		right_case_path = &replacement_dir;
-	if (right_case_path)
+	if (!FileSystem::FindFiles(search_root.c_str(), "*", FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES | FILESYSTEM_FIND_RECURSIVE, &files))
 	{
-		Host::AddKeyedOSDMessage("TextureReplacementDirCaseMismatch",
-			fmt::format(TRANSLATE_FS("TextureReplacement", "Texture replacement directory {} will not work on case sensitive filesystems.\n"
-			                                               "Rename it to {} to remove this warning."),
-			            wrong_case_path, *right_case_path),
-			Host::OSD_WARNING_DURATION);
-	}
-
-	if (!FileSystem::FindFiles(replacement_dir.c_str(), "*", FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_HIDDEN_FILES | FILESYSTEM_FIND_RECURSIVE, &files))
-	{
-		// gt4-gs 1.2.0: the same console line as a load with files, so a missing folder is visible in the log.
-		Console.WriteLn("gt4-gs textures: 0 replacement(s) in %s", replacement_dir.c_str());
+		// the same console line as a load with files, so a missing folder is visible in the log.
+		Console.WriteLn("gt4-gs textures: 0 replacement(s) in %s", search_root.c_str());
 		return;
 	}
 
@@ -443,8 +400,8 @@ void GSTextureReplacements::ReloadReplacementMap()
 	}
 
 	// gt4-gs 1.2.0: one console line per load, so the folder that was read is visible in the log (checked by the
-	// texture test in gt4gs/tests).
-	Console.WriteLn("gt4-gs textures: %u replacement(s) in %s", static_cast<u32>(s_replacement_texture_filenames.size()), replacement_dir.c_str());
+	// texture tests in gt4gs/tests). 1.2.1: the line names the search root (the Textures folder).
+	Console.WriteLn("gt4-gs textures: %u replacement(s) in %s", static_cast<u32>(s_replacement_texture_filenames.size()), search_root.c_str());
 	if (!s_replacement_texture_filenames.empty())
 	{
 		if (GSConfig.PrecacheTextureReplacements)
@@ -810,6 +767,10 @@ void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash
 	const GIFRegTEXA& TEXA, GSTextureCache::SourceRegion region, GSLocalMemory& mem, u32 level)
 {
 	// check if it's been dumped or replaced already
+	// gt4-gs 1.2.1: never dump (see kTextureDumpingAllowed): a dump folder would sit inside the replacement search root.
+	if (!kTextureDumpingAllowed)
+		return;
+
 	const TextureName name(CreateTextureName(hash, level));
 	{
 		std::unique_lock<std::mutex> lock(s_dumped_textures_mutex);
