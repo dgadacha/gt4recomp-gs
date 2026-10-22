@@ -130,9 +130,9 @@ static std::string s_gscap_path;
 static bool s_live_surfaceless = false;
 static u32 s_dump_every = 1; // stream modes: frame dumps only every N vsyncs ([GT4GS] DumpEvery)
 #ifdef GT4GS_NO_JIT
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.2.0 (PCSX2 v2.8.2, no JIT)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.2.1 (PCSX2 v2.8.2, no JIT)";
 #else
-static constexpr const char* GT4GS_VERSION = "gt4gs 1.2.0 (PCSX2 v2.8.2)";
+static constexpr const char* GT4GS_VERSION = "gt4gs 1.2.1 (PCSX2 v2.8.2)";
 #endif
 // gt4-gs 1.1.0: the GT4 display crop in native PS2 pixels (left, top, right, bottom). GT4's display rectangle ends with
 // one column and one row that are not part of the picture (a line along the right and the bottom edge at every

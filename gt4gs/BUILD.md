@@ -182,3 +182,31 @@ and checks follow the script (zip with `gt4-gs.exe`, DLLs, `resources/`, `COPYIN
 Replay check for the texture folder (headless, no window): `gt4-gs.exe --replay-gscap <capture> --config <ini>` with
 `[Folders] Textures` pointing at a scratch folder that holds `replacements\<tiny png>`; the log names the replacement
 found (`Found ... replacement`) without any serial folder.
+
+## Release 1.2.1 (TASK-093): texture folder is the search root
+
+Same recipe, options and dependency script as 1.2.0 (`GT4GS_ONLY=ON`, `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON` as in the
+CI recipe; the dependency script hash is unchanged, so the same cached dependency folder works with `-DCMAKE_PREFIX_PATH`).
+Branch `gt4gs/textures-root-1.2.1` (worktree of `gt4gs/textures-1.2.0`).
+
+Change (`pcsx2/GS/Renderers/HW/GSTextureReplacements.cpp`, `pcsx2-gt4gs/Main.cpp`):
+
+- `ReloadReplacementMap()` searches `[Folders] Textures` itself, recursively (`FILESYSTEM_FIND_RECURSIVE`, unbounded
+  depth; `FileSystem::RecursiveFindFiles` guards symbolic-link loops). The old `replacements` folder is one more
+  subfolder. The serial-folder check and the case-mismatch OSD warning are removed: the search does not depend on folder
+  names in between. The console line `gt4-gs textures: N replacement(s) in <Textures>` names the root.
+- Dumps stay out of the search root: `DumpTexture()` returns at once and `GetDumpFilename()` returns an empty name while
+  `kTextureDumpingAllowed` is false, so no `Textures\dumps` folder is created. Nothing else gt4-gs writes goes under
+  `Textures` (cache files are under `[Folders] Cache`). Re-enabling dumping needs a dump folder outside `Textures` first.
+- Version string `gt4gs 1.2.1`.
+
+Test: `gt4gs/tests/test_textures_1_2.py` (updated for the root; run it against the built exe and a `.gscap` capture):
+three synthetic packs at depth 0, depth 3 and under `Textures\SCUS-97328\replacements` are all counted; nothing but
+the packs is under `Textures` afterwards; an empty folder gives identical frames.
+
+```
+python gt4gs\tests\test_textures_1_2.py --gt4gs <build>\pcsx2-gt4gs\gt4-gs.exe --gscap <capture.gscap> --work <new empty dir>
+```
+
+The package is `gt4-gs-1.2.1-windows-x64.zip`, built with `package-gt4gs.ps1 -Version 1.2.1` (not tagged, not published:
+the owner's in-game test comes first).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0+
-"""gt4-gs 1.2.0 consumer test: custom texture folder, load-only textures and the 2-row bottom crop.
+"""gt4-gs 1.2.0 consumer test (updated for 1.2.1): custom texture folder, load-only textures and the 2-row bottom crop.
 
 Usage:
   test_textures_1_2.py --gt4gs <gt4-gs.exe> --gscap <capture.gscap> --work <new empty folder>
@@ -9,10 +9,11 @@ The capture is any GT4Recomp .gscap version 2 file (for example a headless menus
 the capture; every output goes into --work. gt4-gs runs offline (--replay-gscap), surfaceless, with --surface-size
 2560x1080. Checks, from the console log and the frame dumps:
 
-- The replacement folder is `[Folders] Textures` + `replacements`, with no game-serial subfolder: a synthetic
-  replacement name placed there is counted ("gt4-gs textures: 1 replacement(s) in <folder>"); the same file placed in
-  `Textures/SCUS-97328/replacements` is not counted.
-- An empty replacement folder changes nothing: the frame dumps are byte-identical to a run without the folder.
+- The search root is `[Folders] Textures` itself (gt4-gs 1.2.1), searched recursively: synthetic replacement names
+  placed directly in Textures, at depth 3 (Textures/replacements/level1/level2/level3) and in the serial layout
+  (Textures/SCUS-97328/replacements) are all counted ("gt4-gs textures: 3 replacement(s) in <Textures>").
+- Nothing but the packs and their folders is under Textures afterwards: gt4-gs writes no dump folder there.
+- An empty texture folder changes nothing: the frame dumps are byte-identical to a run with the packs.
 - Texture dumping is not available: `DumpReplaceableTextures = true` is refused ("fixed by gt4-gs").
 - The GT4 display crop is 2 native pixels at the bottom and 1 at the right ("display crop left 0 top 0 right 1 bottom 2");
   a config `CropBottom = 5` is refused.
@@ -31,9 +32,11 @@ SURFACE = (2560, 1080)
 # startup log is complete before that. 0 is accepted too.
 EXIT_CODES = (0, -16843010 & 0xFFFFFFFF)
 SERIAL = "SCUS-97328"
-# A replacement name in PCSX2's form: <TEX0 hash, 16 hex digits>-<bits, 8 hex digits>.png. The hash matches no texture
-# of a menus capture, so the frames of a run with the pack must equal the frames of a run without it.
+# Replacement names in PCSX2's form: <TEX0 hash, 16 hex digits>-<bits, 8 hex digits>.png. The hashes match no texture
+# of a menus capture, so the frames of a run with the packs must equal the frames of a run without them.
 PACK_NAME = "0123456789abcdef-00000000.png"
+DEEP_NAME = "fedcba9876543210-00000000.png"
+SERIAL_NAME = "00000000000000aa-00000000.png"
 PNG_SIGNATURE = bytes([137, 80, 78, 71, 13, 10, 26, 10])
 
 
@@ -46,14 +49,18 @@ def write_config(path, folder, extra_lines):
         file.write("\n".join(lines))
 
 
-def run(gt4gs, gscap, folder, pack_folder, extra_lines):
-    """One replay. `pack_folder` is the texture folder to fill with the synthetic pack, or None."""
+def write_pack(folder, name):
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, name), "wb") as file:
+        file.write(PNG_SIGNATURE)
+
+
+def run(gt4gs, gscap, folder, extra_lines, packs):
+    """One replay. `packs` lists (folder, file name) pairs of synthetic replacement files to write first."""
     os.makedirs(os.path.join(folder, "dump"))
     os.makedirs(os.path.join(folder, "data"))
-    if pack_folder is not None:
-        os.makedirs(pack_folder)
-        with open(os.path.join(pack_folder, PACK_NAME), "wb") as file:
-            file.write(PNG_SIGNATURE)
+    for pack_folder, name in packs:
+        write_pack(pack_folder, name)
     config = os.path.join(folder, "gt4-gs.ini")
     write_config(config, folder, extra_lines)
     command = [gt4gs, "--config", config, "--surface-size", "%dx%d" % SURFACE, "--replay-gscap", gscap]
@@ -89,40 +96,42 @@ def main():
 
     refused = ["DumpReplaceableTextures = true", "CropBottom = 5"]
 
-    # Run 1: the pack in Textures\replacements (no serial folder), plus two refused keys.
-    run1 = os.path.join(options.work, "run1-pack")
+    # Run 1: three packs under Textures (directly, nested at depth 3, and the serial layout), plus two refused keys.
+    run1 = os.path.join(options.work, "run1-packs")
     textures = os.path.join(run1, "Textures")
-    code, log = run(options.gt4gs, options.gscap, run1, os.path.join(textures, "replacements"), refused)
+    packs = [
+        (textures, PACK_NAME),
+        (os.path.join(textures, "replacements", "level1", "level2", "level3"), DEEP_NAME),
+        (os.path.join(textures, SERIAL, "replacements"), SERIAL_NAME),
+    ]
+    code, log = run(options.gt4gs, options.gscap, run1, refused, packs)
     check(code in EXIT_CODES, "run 1 exit code is a normal end (got %d)" % code)
-    check("gt4-gs textures: 1 replacement(s) in " + os.path.join(textures, "replacements") in log,
-          "run 1: the pack in Textures/replacements is read (no serial folder)")
+    check("gt4-gs textures: 3 replacement(s) in " + textures in log,
+          "run 1: packs at depth 0, depth 3 and under Textures/%s are all read (search root is Textures)" % SERIAL)
     check("ignoring [EmuCore/GS] DumpReplaceableTextures = true" in log and "fixed by gt4-gs" in log,
           "run 1: DumpReplaceableTextures = true is refused")
     check("ignoring [EmuCore/GS] CropBottom = 5" in log, "run 1: CropBottom from the settings file is refused")
-    check("gt4-gs: display crop left 0 top 0 right 1 bottom 2" in log, "run 1: the GT4 crop is 2 rows at the bottom, 1 at the right")
-    check(sorted(os.listdir(textures)) == ["replacements"], "run 1: nothing but the replacements folder is written under Textures")
+    check("gt4-gs: display crop left 0 top 0 right 1 bottom 2" in log,
+          "run 1: the GT4 crop is 2 rows at the bottom, 1 at the right")
+    check(sorted(os.listdir(textures)) == sorted([PACK_NAME, "replacements", SERIAL]),
+          "run 1: nothing else is written under Textures (no dumps folder)")
 
-    # Run 2: no pack: nothing is read, and the frames must equal run 1's frames byte for byte.
+    # Run 2: no pack at all: nothing is read, and the frames must equal run 1's frames byte for byte.
     run2 = os.path.join(options.work, "run2-empty")
-    code, log = run(options.gt4gs, options.gscap, run2, None, [])
+    code, log = run(options.gt4gs, options.gscap, run2, [], [])
     check(code in EXIT_CODES, "run 2 exit code is a normal end (got %d)" % code)
-    check("gt4-gs textures: 0 replacement(s)" in log, "run 2: an empty folder gives 0 replacements")
+    check("gt4-gs textures: 0 replacement(s) in " + os.path.join(run2, "Textures") in log,
+          "run 2: an empty texture folder gives 0 replacements and names the Textures folder")
     names = frame_dumps(run1)
     if names:
         check(names == frame_dumps(run2), "run 2: the same frame files as run 1 (%d)" % len(names))
         same = all(filecmp.cmp(os.path.join(run1, "dump", name), os.path.join(run2, "dump", name), shallow=False)
                    for name in names)
-        check(same, "run 2: frames byte-identical to run 1 (the pack matches no texture of this capture)")
+        check(same, "run 2: frames byte-identical to run 1 (the packs match no texture of this capture)")
     else:
         # The offline replay of this build ends after VM initialization with the frame dumps not written (the same
         # with gt4-gs 1.1.0); the checks above come from the startup log, which is written before that.
         print("INFO run 2: no frame dumps from the offline replay (as with gt4-gs 1.1.0); the byte comparison is skipped")
-
-    # Run 3: the same pack under the serial folder (the PCSX2 layout): it must not be read.
-    run3 = os.path.join(options.work, "run3-serial")
-    code, log = run(options.gt4gs, options.gscap, run3, os.path.join(run3, "Textures", SERIAL, "replacements"), [])
-    check(code in EXIT_CODES, "run 3 exit code is a normal end (got %d)" % code)
-    check("gt4-gs textures: 0 replacement(s)" in log, "run 3: a pack under Textures/%s is not read" % SERIAL)
 
     print("%d failure(s)" % len(failures))
     sys.exit(1 if failures else 0)

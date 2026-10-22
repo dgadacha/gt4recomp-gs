@@ -42,6 +42,9 @@ decision 0070 of the GT4Recomp repository (https://github.com/moesuito/gt4-stati
   bottom 1 native pixels, not a setting), the "Stretch" aspect ratio accepted from the settings file, and GS stream
   protocol 1.3: CONTROL kind 7 `display_aspect` (section "Protocol 1.3" below). READY says `version_minor` 3; a 1.2 game
   works unchanged.
+- Branch `gt4gs/textures-root-1.2.1`: **gt4-gs 1.2.1** (not tagged or published; waits for the owner's test). The texture
+  folder is the search root itself: replacements are read from `[Folders] Textures` recursively, at any depth (see
+  "Texture replacements" below). Nothing gt4-gs writes lands in that folder.
 - Branch `gt4gs/textures-1.2.0` (TASK-088): **`gt4gs-v1.2.0`** (draft until the owner's in-game test). Custom texture
   loading: the replacement folder is `[Folders] Textures` itself (`replacements` inside it, no game-serial subfolder);
   texture dumping is not available (load only). The GT4 display crop is 2 native pixels at the bottom (was 1) and 1 at the
@@ -149,14 +152,21 @@ gt4-gs.exe [GSRunner options] <dump.gs>                             GSRunner's G
   refused, error 1655` and ends with `GT4GS no-JIT audit (...): N regions, 0 executable non-image regions`.
   `gt4gs/check-nojit.ps1` checks a package statically.
 
-## Texture replacements (gt4-gs 1.2.0)
+## Texture replacements (gt4-gs 1.2.1)
 
-PCSX2's texture replacement loader is compiled into gt4-gs and reads the packs of a `replacements` folder. In the stream
-modes gt4-gs 1.2.0 changes three things:
+PCSX2's texture replacement loader is compiled into gt4-gs and reads replacement files from a texture folder. In the
+stream modes gt4-gs 1.2.1 changes three things (1.2.0 read only `<Textures>\replacements`):
 
-- **Folder.** The replacements are read from `<[Folders] Textures>\replacements` directly. PCSX2 normally uses
-  `<Textures>\<serial>\replacements`; the serial folder is gone (`GSTextureReplacements::GetGameTextureDirectory`).
-  The GT4Recomp launcher sets `[Folders] Textures` to `Documents\Gran Turismo 4\Textures`.
+- **Folder.** The search root is `[Folders] Textures` itself, searched recursively to any depth
+  (`GSTextureReplacements::GetGameTextureDirectory`, `ReloadReplacementMap`). A pack can sit directly in `Textures`, in
+  `Textures\<any folders>\`, or in the old `Textures\replacements\` (one more subfolder of the search). The PCSX2 serial
+  folder `Textures\<serial>\replacements` is also found, since it is a subfolder. Only files with a loader extension and a
+  PCSX2 replacement name are used; other files and folders are ignored. The GT4Recomp launcher sets `[Folders] Textures`
+  to `Documents\Gran Turismo 4\Textures`. The console line `gt4-gs textures: N replacement(s) in <folder>` names the root.
+- **Dumps stay out.** Texture dumping is off (see "Load only" below), so gt4-gs creates no `Textures\dumps` folder and
+  writes nothing under the search root. The `dumps` folder that `GetDumpFilename` would use is inside the search root,
+  which is why dumping stays compiled out: re-enabling it needs a dump folder outside `Textures` first. Cache files are not
+  written under `Textures` (the cache is `[Folders] Cache`).
 - **Settings.** `[EmuCore/GS] LoadTextureReplacements` (the launcher writes it, default true) and
   `PrecacheTextureReplacements` (default false) are in the allow-list of the game repository, so a config file can set
   them. An empty replacements folder changes nothing.
