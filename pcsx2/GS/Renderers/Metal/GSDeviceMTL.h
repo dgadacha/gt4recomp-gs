@@ -264,6 +264,17 @@ public:
 	MRCOwned<id<MTLRenderPipelineState>> m_shadeboost_pipeline;
 	MRCOwned<id<MTLRenderPipelineState>> m_imgui_pipeline;
 
+	// GT4Recomp fork (macOS port): HDR presentation and MetalFX upscaling (GSGT4Presentation).
+	MRCOwned<id<MTLRenderPipelineState>> m_hdr_present_pipeline; ///< ps_hdr_expand to an RGBA16Float layer
+	MRCOwned<id<MTLRenderPipelineState>> m_imgui_hdr_pipeline;
+	bool m_layer_hdr = false; ///< the layer is configured for extended dynamic range (GS thread)
+	float m_hdr_peak_limit = 1.0f; ///< the screen's potential EDR headroom when HDR was turned on
+	float m_hdr_peak = 1.0f; ///< the highlight peak of the current frame
+	float m_hdr_configured_peak = 0.0f; ///< the peak the layer's content headroom was set for (macOS 26)
+	MRCOwned<id> m_metalfx_scaler; ///< id<MTLFXSpatialScaler> (macOS 13 or later)
+	GSTexture* m_metalfx_output = nullptr;
+	bool m_metalfx_refused_logged = false;
+
 	id<MTLRenderPipelineState> GetConvertPipeline(ShaderConvertSelector shader) const
 	{
 		return m_convert_pipeline[shader.Index()];
@@ -396,6 +407,10 @@ public:
 	void DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float params[4]) override;
 
 	bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) override;
+	bool UpscaleToDisplay(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect) override;
+	/// GT4Recomp fork (macOS port): the layer's pixel format, colour space and dynamic range for HDR (with this
+	/// highlight peak) or SDR output.
+	void ConfigureLayerDynamicRange(bool hdr, float peak);
 
 	MRCOwned<id<MTLFunction>> LoadShader(NSString* name);
 	MRCOwned<id<MTLRenderPipelineState>> MakePipeline(MTLRenderPipelineDescriptor* desc, id<MTLFunction> vertex, id<MTLFunction> fragment, NSString* name);

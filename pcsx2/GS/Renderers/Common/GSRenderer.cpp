@@ -669,6 +669,9 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 				GetVideoMode() == GSVideoMode::SDTV_480P);
 			s_last_draw_rect = draw_rect;
 
+			// GT4Recomp fork (macOS port): MetalFX enlarges the picture to its display size ([GT4GS] MetalFX).
+			g_gs_device->UpscaleToDisplay(current, src_rect, src_uv, draw_rect);
+
 			if (GSConfig.CASMode != GSCASMode::Disabled)
 			{
 				static bool cas_log_once = false;

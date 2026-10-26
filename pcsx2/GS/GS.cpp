@@ -54,6 +54,7 @@
 
 #include <atomic>
 #include <fstream>
+#include <mutex>
 
 Pcsx2Config::GSOptions GSConfig;
 
@@ -84,6 +85,22 @@ void GSSetDeferredSwapChainAcquire(bool deferred)
 bool GSGetDeferredSwapChainAcquire()
 {
 	return s_deferred_swap_chain_acquire.load(std::memory_order_relaxed);
+}
+
+// GT4Recomp fork (macOS port): see GS.h. Set by the frontend, read by the GS thread at each presentation.
+static std::mutex s_gt4_presentation_mutex;
+static GSGT4Presentation s_gt4_presentation;
+
+void GSSetGT4Presentation(const GSGT4Presentation& presentation)
+{
+	std::lock_guard lock(s_gt4_presentation_mutex);
+	s_gt4_presentation = presentation;
+}
+
+GSGT4Presentation GSGetGT4Presentation()
+{
+	std::lock_guard lock(s_gt4_presentation_mutex);
+	return s_gt4_presentation;
 }
 
 void GSAddSwapChainAcquireWait(u64 microseconds)

@@ -397,3 +397,17 @@ fragment float4 ps_automagical_supersampling(ConvertShaderData data [[stage_in]]
 
 	return float4(col / div, 1);
 }
+
+// GT4Recomp fork (macOS port): the presentation on an extended dynamic range layer (RGBA16Float, extended linear sRGB;
+// GSDeviceMTL::ConfigureLayerDynamicRange). The picture is SDR sRGB: it is decoded to linear light, then the highlights
+// above hdr_knee (linear luminance) are expanded towards hdr_peak times SDR white, so shadows and midtones keep their
+// SDR look while lights, the sky and reflections use the display's headroom (an inverse tone map).
+fragment float4 ps_hdr_expand(ConvertShaderData data [[stage_in]], ConvertPSRes res,
+	constant GSMTLPresentPSUniform& uniform [[buffer(GSMTLBufferIndexUniforms)]])
+{
+	const float3 srgb = saturate(res.sample(data.t).rgb);
+	const float3 linear = select(pow((srgb + 0.055f) / 1.055f, 2.4f), srgb / 12.92f, srgb <= 0.04045f);
+	const float luminance = dot(linear, float3(0.2126f, 0.7152f, 0.0722f));
+	const float boost = smoothstep(uniform.hdr_knee, 1.f, luminance);
+	return float4(linear * (1.f + (uniform.hdr_peak - 1.f) * boost * boost), 1.f);
+}

@@ -213,9 +213,9 @@ the owner's in-game test comes first).
 
 ## macOS arm64 (branch gt4gs/macos)
 
-`gt4-gs` for the macOS port of GT4Recomp (github.com/dgadacha/gt4-mac, from commit `86fb754`; its
-`docs/BUILD-MACOS.md` covers the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro (macOS 26.6,
-Xcode 26.2). Not released: build it from the branch.
+`gt4-gs` for the macOS port of GT4Recomp (github.com/dgadacha/gt4-mac, from commit `86fb754`, HDR and MetalFX from
+`8e2021c`; its `docs/BUILD-MACOS.md` covers the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro
+(macOS 26.6, Xcode 26.2). Not released: build it from the branch.
 
 ```
 xcodebuild -downloadComponent MetalToolchain
@@ -249,8 +249,21 @@ Changes for macOS:
 - Replay without a window (`--replay-gscap`): `GSDeviceMTL::BeginPresent` submits each frame and keeps the GPU at most
   two frames behind (before, the frame's work stayed in one command buffer and the upload buffers doubled until the
   Metal driver could not allocate them), and the replayer prints the GS thread frame times of every 600 vsyncs.
+- HDR (`[GT4GS] HDR`, `HDRPeak`, read again by CONTROL reload_config; `GSSetGT4Presentation` in `GS.h`): the Metal
+  layer becomes RGBA16Float in extended linear sRGB and asks for high dynamic range (`preferredDynamicRange` and
+  `contentsHeadroom` on macOS 26, the EDR flag before; `GSDeviceMTL::ConfigureLayerDynamicRange`, between two frames),
+  and the presentation goes through `ps_hdr_expand` (`present.metal`): the SDR picture decoded to linear light, its
+  highlights above luminance 0.7 expanded towards HDRPeak percent of SDR white (default 300), limited to the screen's
+  potential headroom. ImGui draws with an RGBA16Float pipeline on that layer.
+- MetalFX (`[GT4GS] MetalFX`): `GSDeviceMTL::UpscaleToDisplay` (a `GSDevice` virtual, called by `GSRenderer::VSync`
+  before CAS) enlarges the picture to its display rectangle with the MetalFX spatial scaler (macOS 13 or later, weak
+  linked) when it is smaller on both axes and starts at the texture's origin; otherwise the picture is presented as
+  before.
 
 Checked: a 6,000-frame capture of the macOS game (menus, movie, Arcade race on the Nordschleife) replays at 1x, 3x, 4x
 and 6x (race frames: about 2 ms per frame at 1x, 7.4 ms at 6x); in live mode the picture shows in the game window,
-follows window and fullscreen changes, and 6x holds 60 FPS in a 1920x1080 window. Known: the 480i menus leave a black
-band at the bottom of the picture.
+follows window and fullscreen changes, and 6x holds 60 FPS in a 1920x1080 window. HDR and MetalFX, live in the game
+window: 2x with MetalFX in a 1920x1080 window holds 60 FPS (4.3 to 6.2 ms of GPU time per race frame); with HDR on, the
+picture keeps its colours (window captures are SDR). The screen's EDR headroom rises only while the picture is visible;
+a two-process test of the same layer setup raised it to 5.33 (M3 Pro, potential 16). Known: the 480i menus leave a
+black band at the bottom of the picture.

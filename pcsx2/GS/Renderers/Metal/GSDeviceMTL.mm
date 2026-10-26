@@ -18,6 +18,13 @@
 #ifdef __APPLE__
 #include "GSMTLSharedHeader.h"
 
+#import <AppKit/AppKit.h>
+#import <MetalFX/MetalFX.h>
+
+// GT4Recomp fork (macOS port): linear luminance from which ps_hdr_expand expands the highlights (sRGB 0.85), so that
+// only near-white areas reach the peak.
+static constexpr float GT4_HDR_KNEE = 0.7f;
+
 static constexpr simd::float2 ToSimd(const GSVector2& vec)
 {
 	return simd::make_float2(vec.x, vec.y);
@@ -747,6 +754,82 @@ void GSDeviceMTL::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float par
 	RenderCopy(sTex, m_shadeboost_pipeline, GSVector4i(0, 0, dTex->GetSize().x, dTex->GetSize().y));
 }
 
+// GT4Recomp fork (macOS port): MetalFX spatial upscaling (macOS 13 or later) of the picture to its display rectangle
+// ([GT4GS] MetalFX). It only enlarges, from the texture's origin, so a picture that is not smaller than the rectangle
+// on both axes, or that starts elsewhere, is presented as before.
+bool GSDeviceMTL::UpscaleToDisplay(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect)
+{ @autoreleasepool {
+	if (!GSGetGT4Presentation().metalfx)
+		return false;
+	const int dst_width = static_cast<int>(std::ceil(draw_rect.z - draw_rect.x));
+	const int dst_height = static_cast<int>(std::ceil(draw_rect.w - draw_rect.y));
+	if (src_rect.x != 0 || src_rect.y != 0 || dst_width < src_rect.width() || dst_height < src_rect.height() ||
+		(dst_width == src_rect.width() && dst_height == src_rect.height()))
+		return false;
+	if (@available(macOS 13.0, *))
+	{
+		id<MTLTexture> input = static_cast<GSTextureMTL*>(tex)->GetTexture();
+		id<MTLFXSpatialScaler> scaler = m_metalfx_scaler;
+		if (!scaler || scaler.inputWidth != input.width || scaler.inputHeight != input.height ||
+			scaler.outputWidth != static_cast<NSUInteger>(dst_width) || scaler.outputHeight != static_cast<NSUInteger>(dst_height) ||
+			scaler.colorTextureFormat != input.pixelFormat)
+		{
+			if (![MTLFXSpatialScalerDescriptor supportsDevice:m_dev.dev])
+			{
+				if (!m_metalfx_refused_logged)
+					Console.Warning("GS: MetalFX is not supported on this GPU; the picture is presented without it");
+				m_metalfx_refused_logged = true;
+				return false;
+			}
+			MTLFXSpatialScalerDescriptor* desc = [[MTLFXSpatialScalerDescriptor new] autorelease];
+			desc.inputWidth = input.width;
+			desc.inputHeight = input.height;
+			desc.outputWidth = dst_width;
+			desc.outputHeight = dst_height;
+			desc.colorTextureFormat = input.pixelFormat;
+			desc.outputTextureFormat = input.pixelFormat;
+			desc.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual; // sRGB-encoded 8-bit picture
+			m_metalfx_scaler = MRCTransfer<id>([desc newSpatialScalerWithDevice:m_dev.dev]);
+			scaler = m_metalfx_scaler;
+			delete m_metalfx_output;
+			m_metalfx_output = nullptr;
+			if (scaler)
+			{
+				MTLTextureDescriptor* out_desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:input.pixelFormat
+					width:dst_width height:dst_height mipmapped:NO];
+				out_desc.storageMode = MTLStorageModePrivate;
+				out_desc.usage = scaler.outputTextureUsage | MTLTextureUsageShaderRead;
+				MRCOwned<id<MTLTexture>> out = MRCTransfer([m_dev.dev newTextureWithDescriptor:out_desc]);
+				if (out)
+					m_metalfx_output = new GSTextureMTL(this, out, nil, GSTexture::Usage::Texture, tex->GetFormat());
+			}
+			if (!scaler || !m_metalfx_output)
+			{
+				Console.Error("GS: cannot create the MetalFX scaler for %dx%d to %dx%d", src_rect.width(), src_rect.height(),
+					dst_width, dst_height);
+				m_metalfx_scaler = nullptr;
+				return false;
+			}
+			Console.WriteLn("GS: MetalFX upscaling %dx%d to %dx%d", src_rect.width(), src_rect.height(), dst_width, dst_height);
+		}
+		EndRenderPass();
+		scaler.colorTexture = input;
+		scaler.inputContentWidth = src_rect.width();
+		scaler.inputContentHeight = src_rect.height();
+		scaler.outputTexture = static_cast<GSTextureMTL*>(m_metalfx_output)->GetTexture();
+		[scaler encodeToCommandBuffer:GetRenderCmdBuf()];
+		g_perfmon.Put(GSPerfMon::TextureCopies, 1);
+		tex = m_metalfx_output;
+		src_rect = GSVector4i(0, 0, dst_width, dst_height);
+		src_uv = GSVector4(0.0f, 0.0f, 1.0f, 1.0f);
+		return true;
+	}
+	if (!m_metalfx_refused_logged)
+		Console.Warning("GS: MetalFX needs macOS 13 or later; the picture is presented without it");
+	m_metalfx_refused_logged = true;
+	return false;
+}}
+
 bool GSDeviceMTL::DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants)
 { @autoreleasepool {
 	g_perfmon.Put(GSPerfMon::TextureCopies, 1);
@@ -864,6 +947,7 @@ void GSDeviceMTL::AttachSurfaceOnMainThread()
 {
 	pxAssert([NSThread isMainThread]);
 	m_layer = MRCRetain([CAMetalLayer layer]);
+	m_layer_hdr = false; // GT4Recomp fork (macOS port): BeginPresent configures HDR on the new layer again
 	[m_layer setDrawableSize:CGSizeMake(m_window_info.surface_width, m_window_info.surface_height)];
 	[m_layer setDevice:m_dev.dev];
 	m_view = MRCRetain((__bridge NSView*)m_window_info.window_handle);
@@ -878,6 +962,48 @@ void GSDeviceMTL::DetachSurfaceOnMainThread()
 	[m_view setWantsLayer:NO];
 	m_view = nullptr;
 	m_layer = nullptr;
+}
+
+// GT4Recomp fork (macOS port): HDR output. An RGBA16Float layer in extended linear sRGB lets values above 1.0 light the
+// display brighter than SDR white, up to the screen's headroom (ps_hdr_expand writes them). macOS 26 asks for it with
+// the layer's dynamic range and content headroom (the highlight peak), earlier systems with the EDR flag. The layer is
+// set up on the main thread, between two frames (BeginPresent, before the next drawable).
+void GSDeviceMTL::ConfigureLayerDynamicRange(bool hdr, float peak)
+{
+	m_layer_hdr = hdr;
+	m_hdr_configured_peak = hdr ? peak : 0.0f;
+	OnMainThread([this, hdr, peak] {
+		NSScreen* screen = [NSScreen mainScreen];
+		m_hdr_peak_limit = static_cast<float>([screen maximumPotentialExtendedDynamicRangeColorComponentValue]);
+		CGColorSpaceRef space = hdr ? CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB) : nullptr;
+		[m_layer setPixelFormat:hdr ? MTLPixelFormatRGBA16Float : MTLPixelFormatBGRA8Unorm];
+		[m_layer setColorspace:space];
+		if (space)
+			CGColorSpaceRelease(space);
+		if (@available(macOS 26.0, *))
+		{
+			[m_layer setPreferredDynamicRange:hdr ? CADynamicRangeHigh : CADynamicRangeStandard];
+			[m_layer setContentsHeadroom:hdr ? std::clamp(peak, 1.0f, std::max(m_hdr_peak_limit, 1.0f)) : 0.0];
+		}
+		else
+		{
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+			[m_layer setWantsExtendedDynamicRangeContent:hdr];
+#pragma clang diagnostic pop
+		}
+		Console.WriteLn("GS: HDR output %s (peak x%.2f); EDR headroom of the main screen %.2f now, %.2f potential",
+			hdr ? "on" : "off", peak, [screen maximumExtendedDynamicRangeColorComponentValue], m_hdr_peak_limit);
+		if (hdr)
+		{
+			// The system raises the headroom once EDR content shows: a value above 1 here means the picture uses it
+			// (the window must be visible, not hidden by other windows).
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+				Console.WriteLn("GS: EDR headroom of the main screen %.2f with the HDR picture shown",
+					[[NSScreen mainScreen] maximumExtendedDynamicRangeColorComponentValue]);
+			});
+		}
+	});
 }
 
 // Metal is fun and won't let you use newBufferWithBytes for private buffers
@@ -1314,6 +1440,9 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 		pdesc.colorAttachments[0].pixelFormat = layer_px_fmt;
 		m_present_pipeline[i] = MakePipeline(pdesc, vs_convert, LoadShader(name), [NSString stringWithFormat:@"present_%s", ShaderEntryPoint(conv) + 3]);
 	}
+	// GT4Recomp fork (macOS port): the HDR presentation, to the RGBA16Float layer of ConfigureLayerDynamicRange.
+	pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
+	m_hdr_present_pipeline = MakePipeline(pdesc, vs_convert, LoadShader(@"ps_hdr_expand"), @"present_hdr_expand");
 
 	pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
 	pdesc.colorAttachments[0].blendingEnabled = YES;
@@ -1337,6 +1466,8 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	pdesc.vertexDescriptor.layouts[0].stride = sizeof(ImDrawVert);
 	pdesc.colorAttachments[0].pixelFormat = layer_px_fmt;
 	m_imgui_pipeline = MakePipeline(pdesc, LoadShader(@"vs_imgui"), LoadShader(@"ps_imgui"), @"imgui");
+	pdesc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
+	m_imgui_hdr_pipeline = MakePipeline(pdesc, LoadShader(@"vs_imgui"), LoadShader(@"ps_imgui"), @"imgui_hdr");
 
 	[initCommands commit];
 	return true;
@@ -1350,6 +1481,9 @@ void GSDeviceMTL::Destroy()
 
 	GSDevice::Destroy();
 	GSDeviceMTL::DestroySurface();
+	delete m_metalfx_output;
+	m_metalfx_output = nullptr;
+	m_metalfx_scaler = nullptr;
 	m_queue = nullptr;
 	m_dev.Reset();
 }}
@@ -1466,6 +1600,11 @@ GSDevice::PresentResult GSDeviceMTL::BeginPresent(bool frame_skip)
 		ImGui::EndFrame();
 		return PresentResult::FrameSkipped;
 	}
+	// GT4Recomp fork (macOS port): HDR on or off from the next drawable ([GT4GS] HDR and HDRPeak).
+	const GSGT4Presentation presentation = GSGetGT4Presentation();
+	if (presentation.hdr != m_layer_hdr || (presentation.hdr && presentation.hdr_peak != m_hdr_configured_peak))
+		ConfigureLayerDynamicRange(presentation.hdr, presentation.hdr_peak);
+	m_hdr_peak = std::clamp(presentation.hdr_peak, 1.0f, std::max(m_hdr_peak_limit, 1.0f));
 	id<MTLCommandBuffer> buf = GetRenderCmdBuf();
 	m_current_drawable = MRCRetain([m_layer nextDrawable]);
 	EndRenderPass();
@@ -1775,6 +1914,8 @@ static_assert(offsetof(DisplayConstantBuffer, RcpTargetResolution) == offsetof(G
 static_assert(offsetof(DisplayConstantBuffer, SourceResolution)    == offsetof(GSMTLPresentPSUniform, source_resolution));
 static_assert(offsetof(DisplayConstantBuffer, RcpSourceResolution) == offsetof(GSMTLPresentPSUniform, rcp_source_resolution));
 static_assert(offsetof(DisplayConstantBuffer, TimeAndPad.x)        == offsetof(GSMTLPresentPSUniform, time));
+static_assert(offsetof(DisplayConstantBuffer, TimeAndPad.y)        == offsetof(GSMTLPresentPSUniform, hdr_peak));
+static_assert(offsetof(DisplayConstantBuffer, TimeAndPad.z)        == offsetof(GSMTLPresentPSUniform, hdr_knee));
 
 void GSDeviceMTL::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture* dTex, const GSVector4& dRect, PresentShader shader, float shaderTime, Filter filter)
 { @autoreleasepool {
@@ -1791,6 +1932,13 @@ void GSDeviceMTL::PresentRect(GSTexture* sTex, const GSVector4& sRect, GSTexture
 	}
 	else
 	{
+		// GT4Recomp fork (macOS port): to an HDR layer, the picture goes through ps_hdr_expand (whatever the TV shader).
+		if (m_layer_hdr)
+		{
+			pipe = m_hdr_present_pipeline;
+			cb.TimeAndPad.y = m_hdr_peak;
+			cb.TimeAndPad.z = GT4_HDR_KNEE;
+		}
 		// !dTex → Use current draw encoder
 		[m_current_render.encoder setRenderPipelineState:pipe];
 		[m_current_render.encoder setFragmentSamplerState:m_sampler_hw[filter == Biln ? SamplerSelector::Linear().key : SamplerSelector::Point().key] atIndex:0];
@@ -2776,7 +2924,7 @@ void GSDeviceMTL::RenderImGui(ImDrawData* data)
 	size_t vtx_off = 0;
 	size_t idx_off = data->TotalVtxCount * sizeof(ImDrawVert);
 
-	[enc setRenderPipelineState:m_imgui_pipeline];
+	[enc setRenderPipelineState:m_layer_hdr ? m_imgui_hdr_pipeline : m_imgui_pipeline];
 	[enc setVertexBuffer:map.gpu_buffer offset:map.gpu_offset atIndex:GSMTLBufferIndexVertices];
 	[enc setVertexBytes:&transform length:sizeof(transform) atIndex:GSMTLBufferIndexUniforms];
 

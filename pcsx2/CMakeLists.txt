@@ -1301,6 +1301,8 @@ if (APPLE)
 		${QUARTZCORE_LIBRARY}
 		${AVFOUNDATION_LIBRARY}
 		${COREMEDIA_LIBRARY}
+		# GT4Recomp fork (macOS port): MetalFX upscaling in GSDeviceMTL, used from macOS 13 only (weak link).
+		"-weak_framework MetalFX"
 	)
 endif()
 

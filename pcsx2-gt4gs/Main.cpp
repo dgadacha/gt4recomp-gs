@@ -864,6 +864,18 @@ static bool LoadAllowedSettings(MemorySettingsInterface& ini)
 	return true;
 }
 
+// macOS port: [GT4GS] HDR, HDRPeak (percent of SDR white) and MetalFX, for the Metal device (GSGT4Presentation).
+static void ApplyGT4Presentation(const SettingsInterface& ini)
+{
+	GSGT4Presentation presentation;
+	presentation.hdr = ini.GetBoolValue("GT4GS", "HDR", false);
+	presentation.hdr_peak = static_cast<float>(std::clamp(ini.GetIntValue("GT4GS", "HDRPeak", 300), 100, 1600)) / 100.0f;
+	presentation.metalfx = ini.GetBoolValue("GT4GS", "MetalFX", false);
+	GSSetGT4Presentation(presentation);
+	Console.WriteLnFmt("gt4-gs: HDR {} (peak x{:.2f}), MetalFX {}", presentation.hdr ? "on" : "off", presentation.hdr_peak,
+		presentation.metalfx ? "on" : "off");
+}
+
 bool GSRunner::ApplyGT4Config()
 {
 	if (s_config_path.empty())
@@ -918,13 +930,15 @@ bool GSRunner::ApplyGT4Config()
 	overlay.resolution = ini.GetBoolValue("GT4GS", "PerfOverlayResolution", true);
 	overlay.breakdown = ini.GetBoolValue("GT4GS", "PerfOverlayBreakdown", true);
 	GSStreamOverlay::Configure(overlay, s_stream_mode == StreamMode::Live ? s_parent_pid : 0);
+	ApplyGT4Presentation(ini);
 	Console.WriteLnFmt("Loaded settings from {}{}", s_config_path, s_live_surfaceless ? " (surfaceless)" : "");
 	return true;
 }
 
 // CONTROL reload_config (macOS port, CPU thread): the [EmuCore/GS] keys of the --config file again, applied to the
-// running GS (the internal resolution chosen in the game's Graphics menu). The allow-list and the fixed keys apply as at
-// start; the folders and the [GT4GS] keys keep their start values.
+// running GS (the internal resolution chosen in the game's Graphics menu), and the presentation keys [GT4GS] HDR,
+// HDRPeak and MetalFX. The allow-list and the fixed keys apply as at start; the folders and the other [GT4GS] keys keep
+// their start values.
 bool GSRunner::ReloadGSSettings()
 {
 	MemorySettingsInterface ini;
@@ -933,6 +947,7 @@ bool GSRunner::ReloadGSSettings()
 	for (const auto& [key, value] : ini.GetKeyValueList("EmuCore/GS"))
 		s_settings_interface.SetStringValue("EmuCore/GS", key.c_str(), value.c_str());
 	VMManager::ApplySettings();
+	ApplyGT4Presentation(ini);
 	Console.WriteLnFmt("gt4-gs: GS settings reloaded from {} (internal resolution x{:g})", s_config_path,
 		s_settings_interface.GetFloatValue("EmuCore/GS", "upscale_multiplier", 1.0f));
 	return true;

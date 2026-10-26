@@ -1708,6 +1708,14 @@ public:
 
 	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);
 
+	// GT4Recomp fork (macOS port): enlarges the picture to the size of draw_rect before the presentation, like CAS, and
+	// replaces tex and its rectangles with the result; false when it did nothing. Only the Metal device has one
+	// (MetalFX, GSGT4Presentation::metalfx).
+	virtual bool UpscaleToDisplay(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect)
+	{
+		return false;
+	}
+
 	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);
 
 	void AgePool();

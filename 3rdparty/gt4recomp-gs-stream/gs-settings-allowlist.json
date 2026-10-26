@@ -134,10 +134,7 @@
       "type": "enum",
       "values": [
         "0",
-        "1",
-        "2",
-        "3",
-        "4"
+        "2"
       ]
     },
     {
@@ -550,6 +547,31 @@
       "type": "int",
       "min": 1,
       "max": 100000
+    },
+    {
+      "section": "GT4GS",
+      "key": "HDR",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "section": "GT4GS",
+      "key": "HDRPeak",
+      "type": "int",
+      "min": 100,
+      "max": 1600
+    },
+    {
+      "section": "GT4GS",
+      "key": "MetalFX",
+      "type": "bool",
+      "values": [
+        "true",
+        "false"
+      ]
     },
     {
       "section": "GT4GS",

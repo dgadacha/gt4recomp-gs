@@ -42,6 +42,8 @@ struct GSMTLPresentPSUniform
 	vector_float2 source_resolution;
 	vector_float2 rcp_source_resolution; ///< 1 / source_resolution
 	float time;
+	float hdr_peak; ///< GT4Recomp fork (macOS port), ps_hdr_expand: brightest highlight, in multiples of SDR white
+	float hdr_knee; ///< ps_hdr_expand: linear luminance from which the highlights are expanded
 };
 
 struct GSMTLInterlacePSUniform
