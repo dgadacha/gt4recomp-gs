@@ -86,6 +86,10 @@ namespace GSStreamReplayer
 		void (*resize)(u32 width, u32 height) = nullptr;
 		// Protocol 1.2 CONTROL cursor: auto-hide flags (kCursorFlag*) and the delay without movement.
 		void (*cursor)(u64 flags, u32 hide_delay_ms) = nullptr;
+		// macOS port: the remote layer context of the picture, sent in WINDOW restored (WindowPayload::layer_id).
+		u32 (*layer_id)() = nullptr;
+		// CONTROL reload_config: re-reads the GS settings of the configuration file; false when it cannot be read.
+		bool (*reload_config)() = nullptr;
 	};
 
 	// Called by the frontend before VMManager::Initialize. Takes ownership of the source.

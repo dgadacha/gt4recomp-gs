@@ -64,6 +64,10 @@
 #include <memory>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 namespace proto = gs_stream;
 
 static void StreamCpuReserve() {}
@@ -95,6 +99,9 @@ namespace
 	constexpr u32 kImr = 0x1010;
 	constexpr u32 kCsrFieldBit = 0x2000;
 	constexpr u32 kStatsEveryVsyncs = 500;
+	// macOS port: a file replay prints the GS thread frame times of every kFileReportEveryVsyncs vsyncs, so one scene of
+	// a long capture (a race after the menus) can be read on its own.
+	constexpr u32 kFileReportEveryVsyncs = 600;
 	constexpr u32 kTransferRegisterFirst = 0x50; // BITBLTBUF
 	constexpr u32 kTransferRegisterLast = 0x52; // TRXREG
 
@@ -219,8 +226,11 @@ namespace
 		Common::Timer::Value last = 0;
 		u64 frames = 0, over_17ms = 0, over_33ms = 0, over_50ms = 0, over_100ms = 0;
 		double max_ms = 0.0, total_ms = 0.0;
+		// The current kFileReportEveryVsyncs interval (file replay only).
+		u64 interval_frames = 0, interval_over_17ms = 0;
+		double interval_max_ms = 0.0, interval_total_ms = 0.0;
 
-		void Vsync()
+		void Vsync(u64 frame, bool report_intervals)
 		{
 			const Common::Timer::Value now = Common::Timer::GetCurrentValue();
 			if (last != 0)
@@ -233,8 +243,20 @@ namespace
 				over_33ms += ms > 33.3;
 				over_50ms += ms > 50.0;
 				over_100ms += ms > 100.0;
+				++interval_frames;
+				interval_total_ms += ms;
+				interval_max_ms = std::max(interval_max_ms, ms);
+				interval_over_17ms += ms > 16.7;
 			}
 			last = now;
+			if (report_intervals && frame % kFileReportEveryVsyncs == 0 && interval_frames)
+			{
+				Console.WriteLn(fmt::format("(GSStreamReplayer) GS thread frame times, vsyncs {}-{}: mean {:.3f} ms, max {:.1f} ms, "
+											"over 16.7 ms {}",
+					frame - interval_frames, frame, interval_total_ms / interval_frames, interval_max_ms, interval_over_17ms));
+				interval_frames = interval_over_17ms = 0;
+				interval_max_ms = interval_total_ms = 0.0;
+			}
 		}
 	};
 	GsFrameTimes s_gs_frames;
@@ -462,7 +484,7 @@ namespace
 		else
 			GSCSRr &= ~kCsrFieldBit;
 		MTGS::PostVsyncStart(s_registers_written);
-		MTGS::RunOnGSThread([]() { s_gs_frames.Vsync(); });
+		MTGS::RunOnGSThread([frame = s_frame + 1, file = !s_source->IsLive()]() { s_gs_frames.Vsync(frame, file); });
 		s_registers_written = false;
 		++s_frame;
 		if (s_source->IsLive())
@@ -620,7 +642,8 @@ namespace
 				}
 				MTGS::UpdateDisplayWindow();
 				MTGS::ResizeDisplayWindow(width, height, 1.0f);
-				proto::WindowPayload window{static_cast<u32>(proto::WindowState::restored), 0, 0};
+				const u32 layer_id = s_hooks.layer_id ? s_hooks.layer_id() : 0;
+				proto::WindowPayload window{static_cast<u32>(proto::WindowState::restored), layer_id, 0};
 				s_source->PostEvent(static_cast<u16>(proto::RecordType::window), &window, sizeof(window));
 				return true;
 			}
@@ -647,7 +670,14 @@ namespace
 				return true;
 
 			case proto::ControlKind::reload_config:
-				PostError(proto::ErrorCode::unsupported_record, false, "CONTROL reload_config is not supported yet");
+				if (!s_hooks.reload_config)
+				{
+					PostError(proto::ErrorCode::unsupported_record, false, "CONTROL reload_config is not supported yet");
+					return true;
+				}
+				Console.WriteLn("(GSStreamReplayer) CONTROL reload_config");
+				if (!s_hooks.reload_config())
+					PostError(proto::ErrorCode::internal, false, "cannot read the configuration file again");
 				return true;
 
 			case proto::ControlKind::cursor:
@@ -702,7 +732,11 @@ namespace
 		proto::ReadyPayload ready{};
 		ready.version_major = proto::kVersionMajor;
 		ready.version_minor = GSStreamReplayer::Protocol13::kConsumerVersionMinor; // 1.3 (gt4-gs 1.1.0)
+#ifdef _WIN32
 		ready.consumer_pid = static_cast<u32>(GetCurrentProcessId());
+#else
+		ready.consumer_pid = static_cast<u32>(getpid());
+#endif
 		ready.flags = proto::kReadyFlagPresents;
 		if (GSStreamOverlay::WantsOsdStats())
 			ready.flags |= proto::kReadyFlagOsdStats; // the performance overlay is on: the game sends OSD_STATS

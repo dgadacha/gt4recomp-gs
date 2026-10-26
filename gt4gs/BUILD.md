@@ -210,3 +210,47 @@ python gt4gs\tests\test_textures_1_2.py --gt4gs <build>\pcsx2-gt4gs\gt4-gs.exe -
 
 The package is `gt4-gs-1.2.1-windows-x64.zip`, built with `package-gt4gs.ps1 -Version 1.2.1` (not tagged, not published:
 the owner's in-game test comes first).
+
+## macOS arm64 (branch gt4gs/macos)
+
+`gt4-gs` for the macOS port of GT4Recomp (github.com/dgadacha/gt4-mac, from commit `86fb754`; its
+`docs/BUILD-MACOS.md` covers the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro (macOS 26.6,
+Xcode 26.2). Not released: build it from the branch.
+
+```
+xcodebuild -downloadComponent MetalToolchain
+brew install cmake ninja sdl3 zstd lz4 libpng jpeg-turbo webp freetype harfbuzz
+.github/workflows/scripts/macos/build-dependencies-gt4gs-arm64.sh ../gt4gs-deps
+cmake -S . -B ../gt4gs-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_PREFIX_PATH="$PWD/../gt4gs-deps;$(brew --prefix)" -DENABLE_QT_UI=OFF -DENABLE_GSRUNNER=OFF \
+  -DENABLE_GT4GS=ON -DGT4GS_ONLY=ON -DUSE_VULKAN=OFF -DENABLE_TESTS=OFF -DDISABLE_ADVANCE_SIMD=ON
+cmake --build ../gt4gs-build --target pcsx2-gt4gs
+```
+
+The executable is `pcsx2-gt4gs/gt4-gs` in the build folder, with `resources/` beside it: `Metal23.metallib` (the Metal
+shaders, compiled at build time; the Metal Toolchain is an optional Xcode component) and the rest of `bin/resources`.
+The dependency script builds PlutoVG, PlutoSVG and RapidYAML (the versions and SHA-256 of
+`build-dependencies-universal.sh`); Homebrew provides the others.
+
+Changes for macOS:
+
+- Transport: the vendored `gs_stream_ipc_posix.cpp` (POSIX shared memory, waits on the waiter flags with
+  `os_sync_wait_on_address`, which needs macOS 14.4 or later, peers watched by pid); `PosixCompat.h` gives
+  `gs_stream_file.cpp` its `fopen_s`.
+- JIT-free build on arm64 (`GT4GS_ONLY`, `GT4GS_NO_JIT`): no vixl code generators, as on x86-64; `getpid` on POSIX.
+- Live mode has no window: `pcsx2-gt4gs/LiveViewMac.mm` gives the Metal device an off-screen view whose layer is the
+  root of a remote Core Animation context. CONTROL attach_window (no window handle on macOS) sizes it in pixels, and
+  WINDOW restored sends the context id (`WindowPayload::layer_id`), which the game shows in its own window with a
+  `CALayerHost`. Resize follows CONTROL resize; the cursor policy is the game window's. No Dock icon, no App Nap.
+- CONTROL reload_config: the `[EmuCore/GS]` keys of the `--config` file are read again (allow-list and fixed keys as at
+  start) and applied with `VMManager::ApplySettings()`; the game's Resolution row uses it for the internal resolution.
+- Defaults on macOS: Metal renderer; data root `~/Library/Application Support/GT4Recomp/gt4-gs` without `[GT4GS]
+  DataRoot`.
+- Replay without a window (`--replay-gscap`): `GSDeviceMTL::BeginPresent` submits each frame and keeps the GPU at most
+  two frames behind (before, the frame's work stayed in one command buffer and the upload buffers doubled until the
+  Metal driver could not allocate them), and the replayer prints the GS thread frame times of every 600 vsyncs.
+
+Checked: a 6,000-frame capture of the macOS game (menus, movie, Arcade race on the Nordschleife) replays at 1x, 3x, 4x
+and 6x (race frames: about 2 ms per frame at 1x, 7.4 ms at 6x); in live mode the picture shows in the game window,
+follows window and fullscreen changes, and 6x holds 60 FPS in a 1920x1080 window. Known: the 480i menus leave a black
+band at the bottom of the picture.

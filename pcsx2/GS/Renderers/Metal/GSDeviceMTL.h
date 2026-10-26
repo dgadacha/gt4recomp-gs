@@ -293,6 +293,8 @@ public:
 
 	// MARK: Ephemeral resources
 	MRCOwned<id<MTLCommandBuffer>> m_current_render_cmdbuf;
+	// GT4Recomp fork (macOS port): the last two frames submitted without a surface (BeginPresent).
+	MRCOwned<id<MTLCommandBuffer>> m_surfaceless_frames[2];
 	struct MainRenderEncoder
 	{
 		MRCOwned<id<MTLRenderCommandEncoder>> encoder;

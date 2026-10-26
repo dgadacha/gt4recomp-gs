@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Shared-memory transport for the GS stream protocol (gs_stream_protocol.h; docs/GS-STREAM-PROTOCOL.md section 3).
+// Windows: gs_stream_ipc.cpp; macOS and Linux: gs_stream_ipc_posix.cpp (POSIX shared memory, waits on the waiter
+// flags, the peer watched by pid; the differences are listed at the top of that file).
 //
 // One named mapping per session ("Local\<prefix>-<producer pid>-<128-bit random hex>") holds the control block, the
 // producer -> consumer command ring, the readback response area and the consumer -> producer event ring. Both rings
@@ -24,10 +26,11 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace gs_stream::ipc {
 
-using NativeHandle = void *;  // HANDLE on Windows
+using NativeHandle = void *;  // HANDLE on Windows; a watched process (pid) elsewhere
 
 class IpcError : public std::runtime_error {
  public:
@@ -122,6 +125,8 @@ struct WaitTotals {
   std::uint64_t frames_wait_us = 0, frames_waits = 0;
   std::uint64_t response_wait_us = 0;
   std::uint64_t data_wait_us = 0;
+  // TASK-041: events signalled to a sleeping peer (one SetEvent each), indexed by Wake.
+  std::uint64_t wakes_signalled[4] = {};
 };
 
 class Session {
@@ -145,6 +150,12 @@ class Session {
   void set_peer(NativeHandle process) { peer_ = process; }
   // Spin time before a sleep, in microseconds (default 30).
   void set_spin_us(std::uint32_t spin_us) { spin_us_ = spin_us; }
+  // TASK-041: producer wake batching. A sleeping consumer is woken after `bytes` of GIF/PRIV records since the last
+  // wake-up, at once for every other record type (VSYNC, READ_FIFO, RESET, CONTROL), and before the producer waits
+  // itself (ring space). 0 wakes it for every record (slice191-196 behaviour). Default kDefaultDataWakeBytes.
+  static constexpr std::uint64_t kDefaultDataWakeBytes = 256u << 10;
+  void set_data_wake_bytes(std::uint64_t bytes) { data_wake_bytes_ = bytes; }
+  std::uint64_t data_wake_bytes() const { return data_wake_bytes_; }
   const WaitTotals &wait_totals() const { return waits_; }
   void set_wait_hooks(WaitHooks hooks) { hooks_ = hooks; }
 
@@ -178,6 +189,12 @@ class Session {
   // Raw event signalling (fixtures use it to check spurious wakes).
   void signal(Wake which);
 
+#ifndef _WIN32
+  // POSIX: removes the session name (the consumer has mapped it), so a crash cannot leave the object behind. The
+  // destructor does it too.
+  void release_name();
+#endif
+
  private:
   Session() = default;
   void map_regions();
@@ -190,11 +207,18 @@ class Session {
   std::string name_;
   NativeHandle mapping_ = nullptr;
   std::uint8_t *view_ = nullptr;
+#ifndef _WIN32
+  std::uint64_t view_bytes_ = 0;
+  bool name_owned_ = false;  // producer: the shared memory name still exists
+  std::uint32_t *waiter_flag(Wake which);
+#endif
   ControlBlock *control_ = nullptr;
   std::uint8_t *response_ = nullptr;
   NativeHandle events_[4] = {};
   NativeHandle peer_ = nullptr;
   std::uint32_t spin_us_ = 30;
+  std::uint64_t data_wake_bytes_ = kDefaultDataWakeBytes;
+  std::uint64_t bytes_since_data_wake_ = 0;  // producer: record bytes posted since the last data wake-up check
   RingWriter writer_;
   RingReader reader_;
   WaitTotals waits_;
@@ -202,6 +226,7 @@ class Session {
 };
 
 // A child process in a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: closing the job (destructor) ends it.
+// POSIX: the destructor kills (SIGKILL) a child that still runs.
 class ChildProcess {
  public:
   ChildProcess() = default;
@@ -211,9 +236,14 @@ class ChildProcess {
   ChildProcess(ChildProcess &&other) noexcept;
   ChildProcess &operator=(ChildProcess &&other) noexcept;
 
+#ifdef _WIN32
   // Starts `executable` with `arguments` (one command-line string, appended after the quoted executable path),
   // suspended, assigns it to a new kill-on-close job and resumes it. Standard handles are inherited.
   static ChildProcess spawn(const std::wstring &executable, const std::wstring &arguments);
+#else
+  // Starts `executable` with `arguments` (posix_spawn, the standard streams shared).
+  static ChildProcess spawn(const std::string &executable, const std::vector<std::string> &arguments);
+#endif
 
   NativeHandle process() const { return process_; }
   std::uint32_t pid() const { return pid_; }
@@ -233,6 +263,8 @@ class ChildProcess {
 NativeHandle open_process_for_wait(std::uint32_t pid);
 void close_handle(NativeHandle handle);
 std::uint32_t current_process_id();
+#ifdef _WIN32
 std::wstring widen(const std::string &text);
+#endif
 
 }  // namespace gs_stream::ipc

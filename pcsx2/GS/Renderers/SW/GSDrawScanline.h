@@ -9,12 +9,12 @@
 #include "GS/Renderers/SW/GSVertexSW.h"
 
 // GT4Recomp fork: the JIT-free gt4-gs.exe (GT4GS_NO_JIT) has no code generators; see GSDrawScanline.cpp.
+// The macOS port extends it to ARM64 (vixl code generators left out too).
 #if defined(GT4GS_NO_JIT)
 #elif defined(ARCH_X86)
 #include "GS/Renderers/SW/GSSetupPrimCodeGenerator.all.h"
 #include "GS/Renderers/SW/GSDrawScanlineCodeGenerator.all.h"
-#endif
-#ifdef ARCH_ARM64
+#elif defined(ARCH_ARM64)
 #include "GS/Renderers/SW/GSSetupPrimCodeGenerator.arm64.h"
 #include "GS/Renderers/SW/GSDrawScanlineCodeGenerator.arm64.h"
 #endif

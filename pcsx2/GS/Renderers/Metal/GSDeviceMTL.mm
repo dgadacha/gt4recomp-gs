@@ -1451,6 +1451,18 @@ GSDevice::PresentResult GSDeviceMTL::BeginPresent(bool frame_skip)
 		s_capture_next = true;
 	if (frame_skip || m_window_info.type == WindowInfo::Type::Surfaceless || !g_gs_device)
 	{
+		// GT4Recomp fork (macOS port): without a surface nothing ends a frame, so an unthrottled replay (gt4-gs
+		// --replay-gscap) kept every frame in one command buffer and doubled the upload buffers until the driver could
+		// not allocate them. Submit the frame and stay at most two frames ahead of the GPU, as a swap chain would.
+		if (m_window_info.type == WindowInfo::Type::Surfaceless && m_current_render_cmdbuf)
+		{
+			MRCOwned<id<MTLCommandBuffer>> submitted = m_current_render_cmdbuf;
+			FlushEncoders();
+			if (m_surfaceless_frames[0])
+				[m_surfaceless_frames[0] waitUntilCompleted];
+			m_surfaceless_frames[0] = std::move(m_surfaceless_frames[1]);
+			m_surfaceless_frames[1] = std::move(submitted);
+		}
 		ImGui::EndFrame();
 		return PresentResult::FrameSkipped;
 	}

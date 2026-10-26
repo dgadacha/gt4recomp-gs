@@ -7,8 +7,9 @@ between the game process (producer) and `gt4-gs.exe` (consumer), and the GS sett
 
 | File | Role | Copied from |
 |---|---|---|
-| `gs_stream_protocol.h` | record layouts, control block, `.gscap` v2 file header (protocol 1.2) | `native/gs_stream/`, commit `c8661bb` |
-| `gs_stream_ipc.hpp`, `gs_stream_ipc.cpp` | named mapping, SPSC rings, wake-up events, peer-process waits | `native/gs_stream/`, commit `e5ce53c` |
+| `gs_stream_protocol.h` | record layouts, control block, `.gscap` v2 file header (protocol 1.3) | `native/gs_stream/` of the macOS port (github.com/dgadacha/gt4-mac, commit `86fb754`; adds `WindowPayload::layer_id`) |
+| `gs_stream_ipc.hpp`, `gs_stream_ipc.cpp` | named mapping, SPSC rings, wake-up events, peer-process waits | `native/gs_stream/`, commit `e5ce53c`; the header from the macOS port, commit `86fb754` (POSIX declarations only) |
+| `gs_stream_ipc_posix.cpp` | the same transport on macOS and Linux (POSIX shared memory, address waits, pid peers) | `native/gs_stream/` of the macOS port (github.com/dgadacha/gt4-mac, commit `86fb754`) |
 | `gs_stream_file.hpp`, `gs_stream_file.cpp` | `.gscap` v2 reader and writer | `native/gs_stream/`, commit `e5ce53c` |
 | `gs-settings-allowlist.json` | INI keys and values `gt4-gs.exe` accepts (1.0.0 and later) | `docs/launcher/`, commit `c8661bb` |
 

@@ -78,6 +78,10 @@
 #include "StreamTransport.h"
 #include "gs_stream_protocol.h"
 
+#ifdef __APPLE__
+#include "LiveViewMac.h"
+#endif
+
 // Down here because X11 has a lot of defines that can conflict
 #if defined(__linux__)
 #include <X11/Xlib.h>
@@ -106,6 +110,7 @@ namespace GSRunner
 	static bool AttachToGameWindow(u64 parent_window, u32 width, u32 height);
 	static void ResizeGameChildWindow(u32 width, u32 height);
 	static void SetGameCursorPolicy(u64 flags, u32 hide_delay_ms);
+	static bool ReloadGSSettings();
 } // namespace GSRunner
 
 static constexpr u32 WINDOW_WIDTH = 640;
@@ -824,21 +829,15 @@ namespace
 // Copied sections: [EmuCore/GS] (GS settings), [EmuCore] (EnableGameFixes) and [Folders] (cache, textures, snapshots).
 // [GT4GS] holds the fork's own keys: Surfaceless=true runs without a window (headless checks); DumpDir and DumpEvery
 // write frame PNGs; ShaderCompileNotice and PerfOverlay* configure GSStreamOverlay.
-bool GSRunner::ApplyGT4Config()
+// The --config file's keys that the allow-list accepts (the others are ignored with one warning line each).
+static bool LoadAllowedSettings(MemorySettingsInterface& ini)
 {
-	if (s_config_path.empty())
-	{
-		GSStreamOverlay::Configure({}, s_stream_mode == StreamMode::Live ? s_parent_pid : 0);
-		return true;
-	}
 	INISettingsInterface file_ini(s_config_path);
 	if (!file_ini.Load())
 	{
 		Console.ErrorFmt("Unable to load settings from {}.", s_config_path);
 		return false;
 	}
-	// Only accepted keys reach `ini`; everything below reads from it.
-	MemorySettingsInterface ini;
 	u32 ignored = 0;
 	for (const std::string& section : IniSectionNames(s_config_path))
 	{
@@ -862,6 +861,20 @@ bool GSRunner::ApplyGT4Config()
 		std::fprintf(stderr, "gt4-gs: %u setting(s) of %s ignored; the session starts with the others\n", ignored,
 			s_config_path.c_str());
 	std::fflush(stderr);
+	return true;
+}
+
+bool GSRunner::ApplyGT4Config()
+{
+	if (s_config_path.empty())
+	{
+		GSStreamOverlay::Configure({}, s_stream_mode == StreamMode::Live ? s_parent_pid : 0);
+		return true;
+	}
+	// Only accepted keys reach `ini`; everything below reads from it.
+	MemorySettingsInterface ini;
+	if (!LoadAllowedSettings(ini))
+		return false;
 	for (const char* section : {"EmuCore/GS", "EmuCore", "Folders"})
 	{
 		for (const auto& [key, value] : ini.GetKeyValueList(section))
@@ -909,12 +922,29 @@ bool GSRunner::ApplyGT4Config()
 	return true;
 }
 
+// CONTROL reload_config (macOS port, CPU thread): the [EmuCore/GS] keys of the --config file again, applied to the
+// running GS (the internal resolution chosen in the game's Graphics menu). The allow-list and the fixed keys apply as at
+// start; the folders and the [GT4GS] keys keep their start values.
+bool GSRunner::ReloadGSSettings()
+{
+	MemorySettingsInterface ini;
+	if (s_config_path.empty() || !LoadAllowedSettings(ini))
+		return false;
+	for (const auto& [key, value] : ini.GetKeyValueList("EmuCore/GS"))
+		s_settings_interface.SetStringValue("EmuCore/GS", key.c_str(), value.c_str());
+	VMManager::ApplySettings();
+	Console.WriteLnFmt("gt4-gs: GS settings reloaded from {} (internal resolution x{:g})", s_config_path,
+		s_settings_interface.GetFloatValue("EmuCore/GS", "upscale_multiplier", 1.0f));
+	return true;
+}
+
 // Stream modes: a data root of our own (never the PCSX2 user folder) and the [Folders] keys from the config, applied
 // before the GS opens so the shader and pipeline caches are read from and written to the configured Cache folder.
 static bool ApplyStreamFolders()
 {
 	if (!s_data_root_from_config)
 	{
+#ifdef _WIN32
 		// No [GT4GS] DataRoot: %LOCALAPPDATA%\GT4Recomp\gt4-gs.
 		const char* local = std::getenv("LOCALAPPDATA");
 		if (!local || !*local)
@@ -922,10 +952,25 @@ static bool ApplyStreamFolders()
 			Console.Error("LOCALAPPDATA is not set and the config has no [GT4GS] DataRoot.");
 			return false;
 		}
+#else
+		// macOS port, no [GT4GS] DataRoot: ~/Library/Application Support/GT4Recomp/gt4-gs.
+		const char* home = std::getenv("HOME");
+		if (!home || !*home)
+		{
+			Console.Error("HOME is not set and the config has no [GT4GS] DataRoot.");
+			return false;
+		}
+		const std::string local = Path::Combine(home, "Library/Application Support");
+#endif
 		EmuFolders::DataRoot = Path::Combine(Path::Combine(local, "GT4Recomp"), "gt4-gs");
 	}
+#ifdef _WIN32
+	constexpr bool create_parents = false;
+#else
+	constexpr bool create_parents = true; // the GT4Recomp folder may not exist yet
+#endif
 	if (!FileSystem::DirectoryExists(EmuFolders::DataRoot.c_str()) &&
-		!FileSystem::CreateDirectoryPath(EmuFolders::DataRoot.c_str(), false))
+		!FileSystem::CreateDirectoryPath(EmuFolders::DataRoot.c_str(), create_parents))
 	{
 		Console.ErrorFmt("Cannot create the gt4-gs data folder {}.", EmuFolders::DataRoot);
 		return false;
@@ -968,6 +1013,10 @@ bool GSRunner::PrepareStream()
 		hooks.attach = &GSRunner::AttachToGameWindow;
 		hooks.resize = &GSRunner::ResizeGameChildWindow;
 		hooks.cursor = &GSRunner::SetGameCursorPolicy;
+		hooks.reload_config = &GSRunner::ReloadGSSettings;
+#ifdef __APPLE__
+		hooks.layer_id = &gt4gs::mac::LiveContextId;
+#endif
 	}
 	else
 	{
@@ -1439,8 +1488,13 @@ void GSRunner::SettingsOverride()
 
 	if (s_stream_mode != StreamMode::None)
 	{
-		// GT4Recomp defaults; the --config file can change them (applied after this function).
+		// GT4Recomp defaults; the --config file can change them (applied after this function). The macOS port draws with
+		// Metal (its build has no Vulkan renderer).
+#ifdef __APPLE__
+		s_settings_interface.SetIntValue("EmuCore/GS", "Renderer", static_cast<int>(GSRendererType::Metal));
+#else
 		s_settings_interface.SetIntValue("EmuCore/GS", "Renderer", static_cast<int>(GSRendererType::VK));
+#endif
 		s_settings_interface.SetIntValue("EmuCore/GS", "accurate_blending_unit", static_cast<int>(AccBlendLevel::High));
 		s_settings_interface.SetIntValue("EmuCore/GS", "deinterlace_mode", static_cast<int>(GSInterlaceMode::Automatic));
 		s_settings_interface.SetStringValue("EmuCore/GS", "AspectRatio", "16:9");
@@ -2106,10 +2160,22 @@ int wmain(int argc, wchar_t** argv)
 
 static void* s_window;
 static WindowInfo s_wi;
+// GT4Recomp macOS port, live mode: no window of our own; the Metal layer of this off-screen view is shown by the game
+// in its window (LiveViewMac.h).
+static void* s_live_view;
 
 bool GSRunner::CreatePlatformWindow()
 {
-	pxAssertRel(!s_window, "Tried to create window when there already was one!");
+	pxAssertRel(!s_window && !s_live_view, "Tried to create window when there already was one!");
+	if (s_stream_mode == StreamMode::Live)
+	{
+		s_live_view = gt4gs::mac::CreateLiveView(WINDOW_WIDTH, WINDOW_HEIGHT);
+		if (!s_live_view)
+			return false;
+		Console.WriteLnFmt("gt4-gs: picture layer context {}", gt4gs::mac::LiveContextId());
+		PumpPlatformMessages();
+		return true;
+	}
 	s_window = CocoaTools::CreateWindow("PCSX2 GS Runner", WINDOW_WIDTH, WINDOW_HEIGHT);
 	CocoaTools::GetWindowInfoFromWindow(&s_wi, s_window);
 	PumpPlatformMessages();
@@ -2118,6 +2184,11 @@ bool GSRunner::CreatePlatformWindow()
 
 void GSRunner::DestroyPlatformWindow()
 {
+	if (s_live_view)
+	{
+		gt4gs::mac::DestroyLiveView();
+		s_live_view = nullptr;
+	}
 	if (s_window) {
 		CocoaTools::DestroyWindow(s_window);
 		s_window = nullptr;
@@ -2127,11 +2198,40 @@ void GSRunner::DestroyPlatformWindow()
 std::optional<WindowInfo> GSRunner::GetPlatformWindowInfo()
 {
 	WindowInfo wi;
-	if (s_window)
+	if (s_live_view)
+	{
+		wi.type = WindowInfo::Type::MacOS;
+		wi.window_handle = s_live_view;
+		gt4gs::mac::GetLiveViewSize(&wi.surface_width, &wi.surface_height);
+		wi.surface_scale = 1.0f;
+	}
+	else if (s_window)
 		wi = s_wi;
 	else
 		wi.type = WindowInfo::Type::Surfaceless;
 	return wi;
+}
+
+bool GSRunner::AttachToGameWindow(u64 parent_window, u32 width, u32 height)
+{
+	// macOS: no parent window crosses processes (args[0] is 0). The picture takes the game's size in pixels before the
+	// surface is recreated, and WINDOW restored gives the game the layer context to show (hooks.layer_id).
+	if (!s_live_view)
+		return false; // surfaceless
+	gt4gs::mac::ResizeLiveView(std::max<u32>(width, 1), std::max<u32>(height, 1), true);
+	Console.WriteLnFmt("gt4-gs: picture {}x{} in layer context {}", width, height, gt4gs::mac::LiveContextId());
+	return gt4gs::mac::LiveContextId() != 0;
+}
+
+void GSRunner::ResizeGameChildWindow(u32 width, u32 height)
+{
+	if (s_live_view)
+		gt4gs::mac::ResizeLiveView(width, height, false);
+}
+
+void GSRunner::SetGameCursorPolicy(u64 flags, u32 hide_delay_ms)
+{
+	// macOS: the picture is a layer inside the game's own window, so the cursor stays the game window's.
 }
 
 void GSRunner::PumpPlatformMessages(bool forever)

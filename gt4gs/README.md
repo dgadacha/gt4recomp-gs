@@ -202,7 +202,8 @@ console output to redirected handles, CMake lists, the `GT4GS_ONLY` switches of 
 
 ## Build
 
-See [BUILD.md](BUILD.md). Release downloads are on the GitHub Releases page of this repository, each with
+See [BUILD.md](BUILD.md) (macOS arm64: the section "macOS arm64 (branch gt4gs/macos)"). Release downloads are on the
+GitHub Releases page of this repository, each with
 `SHA256SUMS` and a source archive of the same tag. Since 0.3.1 releases are built and published from the owner's PC
 with `gt4gs/release-local.ps1`; the GitHub Actions workflow is a manual fallback only. Anyone can rebuild a release
 from its tag with BUILD.md.

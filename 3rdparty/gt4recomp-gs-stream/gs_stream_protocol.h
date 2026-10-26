@@ -27,10 +27,11 @@ namespace gs_stream {
 
 inline constexpr std::uint32_t kMagic = 0x54535347u;  // bytes 'G','S','S','T' in memory (little-endian u32)
 inline constexpr std::uint16_t kVersionMajor = 1;     // a consumer refuses a different major version
-inline constexpr std::uint16_t kVersionMinor = 2;     // a consumer accepts a producer minor >= its own minimum
+inline constexpr std::uint16_t kVersionMinor = 3;     // a consumer accepts a producer minor >= its own minimum
 // Version history: 1.0 (TASK-035), 1.1 (TASK-047: VSYNC field is the display field), 1.2 (TASK-060/062: CONTROL cursor,
-// OSD_STATS record, READY flag kReadyFlagOsdStats). A producer sends the 1.2 additions only to a consumer whose READY
-// version_minor is 2 or more.
+// OSD_STATS record, READY flag kReadyFlagOsdStats), 1.3 (TASK-080: CONTROL display_aspect, ERROR bad_argument). A
+// producer sends the 1.2 additions only to a consumer whose READY version_minor is 2 or more, and the 1.3 addition only
+// when it is 3 or more.
 
 inline constexpr std::uint32_t kRecordAlign = 16;  // every record starts on a 16-byte boundary of the ring/file
 inline constexpr std::uint32_t kControlBlockBytes = 4096;
@@ -161,16 +162,26 @@ static_assert(sizeof(ResetPayload) == 16);
 // --- CONTROL ---------------------------------------------------------------------------------------------------
 enum class ControlKind : std::uint32_t {
   shutdown = 1,       // finish the stream, post EXITING, exit
-  attach_window = 2,  // args: native parent window handle (HWND on Windows), width, height
+  attach_window = 2,  // args: native parent window handle (HWND on Windows, 0 on macOS: WindowPayload::layer_id), width, height
   resize = 3,         // args: width, height of the parent client area
   reload_config = 4,  // re-read the consumer's configuration
   snapshot = 5,       // args: snapshot id, width (0 = native), height (0 = native); answered by SNAPSHOT_DONE
   // Version 1.2: mouse cursor policy over the consumer's child window. args: flags (kCursorFlag*), hide delay in
   // milliseconds (1..60000), 0. Without this record a consumer never changes the cursor.
   cursor = 6,
+  // Version 1.3: how the consumer fits the picture into its window from the next presented frame until the next
+  // display_aspect. args: mode (DisplayAspectMode), then two reserved words (sent as 0, ignored). Another mode is
+  // answered by a non-fatal ERROR bad_argument (mode unchanged). Every session starts in game_aspect.
+  display_aspect = 7,
 };
 
 inline constexpr std::uint64_t kCursorFlagAutoHide = 1u;  // hide the cursor over the picture after the delay without movement
+
+// CONTROL display_aspect args[0] (version 1.3).
+enum class DisplayAspectMode : std::uint64_t {
+  game_aspect = 0,  // the consumer settings-file aspect (16:9 by default; pillarbox / letterbox), as before 1.3
+  fill = 1,         // stretch the picture to the whole window
+};
 
 struct ControlPayload {
   std::uint32_t kind;  // ControlKind
@@ -251,6 +262,7 @@ enum class ErrorCode : std::uint32_t {
   unsupported_record = 4,
   device_failure = 5,
   internal = 6,
+  bad_argument = 7,  // version 1.3: a known record or CONTROL kind with an argument outside its range (not fatal)
 };
 
 struct ErrorPayload {
@@ -273,7 +285,10 @@ enum class WindowState : std::uint32_t { lost = 1, restored = 2 };
 
 struct WindowPayload {
   std::uint32_t state;  // WindowState
-  std::uint32_t reserved;
+  // macOS: in the restored answer to CONTROL attach_window, the id of the consumer's remote Core Animation context that
+  // holds the picture (sized in pixels, one layer point per pixel); the producer shows it in its own window through a
+  // CALayerHost. 0 everywhere else (Windows: the consumer's window becomes a child of the producer's).
+  std::uint32_t layer_id;
   std::uint64_t reserved2;
 };
 static_assert(sizeof(WindowPayload) == 16);
