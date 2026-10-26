@@ -1,0 +1,2 @@
+# The reference files are kept byte for byte (CRLF), so that their SHA-256 in README.md holds.
+*.h -text

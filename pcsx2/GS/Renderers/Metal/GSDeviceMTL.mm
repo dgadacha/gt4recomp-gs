@@ -25,6 +25,10 @@
 // only near-white areas reach the peak.
 static constexpr float GT4_HDR_KNEE = 0.7f;
 
+// GT4Recomp fork (macOS port): the SMAA lookup textures (MIT, 3rdparty/smaa).
+#include "../../../../3rdparty/smaa/AreaTex.h"
+#include "../../../../3rdparty/smaa/SearchTex.h"
+
 static constexpr simd::float2 ToSimd(const GSVector2& vec)
 {
 	return simd::make_float2(vec.x, vec.y);
@@ -754,6 +758,96 @@ void GSDeviceMTL::DoShadeBoost(GSTexture* sTex, GSTexture* dTex, const float par
 	RenderCopy(sTex, m_shadeboost_pipeline, GSVector4i(0, 0, dTex->GetSize().x, dTex->GetSize().y));
 }
 
+// GT4Recomp fork (macOS port): the SMAA, bloom and film look of the merged picture ([GT4GS] SMAA, Bloom and FilmLook;
+// gt4smaa.metal, gt4look.metal). Their intermediate targets are kept between frames and replaced when the internal
+// resolution changes.
+void GSDeviceMTL::ApplyGT4Look()
+{ @autoreleasepool {
+	const GSGT4Presentation look = GSGetGT4Presentation();
+	if (!m_current || (!look.smaa && look.bloom <= 0.0f && !look.film))
+		return;
+	const int width = m_current->GetWidth(), height = m_current->GetHeight();
+	const auto keep_target = [this](GSTexture*& target, int target_width, int target_height, GSTexture::Format format) {
+		if (target && target->GetWidth() == target_width && target->GetHeight() == target_height)
+			return true;
+		delete target;
+		target = CreateRenderTarget(target_width, target_height, format, false, false);
+		return target != nullptr;
+	};
+	if (look.smaa && keep_target(m_gt4_smaa_edges, width, height, GSTexture::Format::Color) &&
+		keep_target(m_gt4_smaa_weights, width, height, GSTexture::Format::Color))
+	{
+		const float metrics[4] = {1.0f / width, 1.0f / height, static_cast<float>(width), static_cast<float>(height)};
+		const GSVector4i rect(0, 0, width, height);
+		// 1: edges, into a cleared target (the shader discards the pixels without one).
+		ClearRenderTarget(m_gt4_smaa_edges, 0);
+		BeginRenderPass(@"SMAA edges", m_gt4_smaa_edges, MTLLoadActionLoad, nullptr, MTLLoadActionDontCare);
+		[m_current_render.encoder setFragmentBytes:metrics length:sizeof(metrics) atIndex:GSMTLBufferIndexUniforms];
+		RenderCopy(m_current, m_gt4_smaa_edges_pipeline, rect);
+		// 2: blending weights, from the edges and the lookup textures.
+		BeginRenderPass(@"SMAA weights", m_gt4_smaa_weights, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+		[m_current_render.encoder setFragmentBytes:metrics length:sizeof(metrics) atIndex:GSMTLBufferIndexUniforms];
+		MRESetTexture(m_gt4_smaa_area, GSMTLTextureIndexTex);
+		MRESetTexture(m_gt4_smaa_search, GSMTLTextureIndexPalette);
+		RenderCopy(m_gt4_smaa_edges, m_gt4_smaa_weights_pipeline, rect);
+		// 3: the picture blended with its neighbours.
+		GSTexture*& blended = (m_current == m_target_tmp) ? m_merge : m_target_tmp;
+		if (ResizeRenderTarget(&blended, width, height, false, false))
+		{
+			BeginRenderPass(@"SMAA blend", blended, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+			[m_current_render.encoder setFragmentBytes:metrics length:sizeof(metrics) atIndex:GSMTLBufferIndexUniforms];
+			MRESetTexture(m_gt4_smaa_weights, GSMTLTextureIndexTex);
+			RenderCopy(m_current, m_gt4_smaa_blend_pipeline, rect);
+			m_current = blended;
+		}
+	}
+	if (look.bloom <= 0.0f && !look.film)
+		return;
+	int levels = 0;
+	if (look.bloom > 0.0f)
+	{
+		int level_width = width, level_height = height;
+		for (; levels < GT4_BLOOM_LEVELS; levels++)
+		{
+			level_width = std::max(1, level_width / 2);
+			level_height = std::max(1, level_height / 2);
+			if (level_width < 8 || level_height < 8)
+				break;
+			if (!keep_target(m_gt4_bloom[levels], level_width, level_height, GSTexture::Format::ColorHDR))
+				return;
+		}
+		// The light above a soft threshold (linear light 0.5, sRGB 0.73, with a knee of 0.25 below it), then down the
+		// chain and back up.
+		const float prefilter[4] = {0.5f, 0.25f, 0.0f, 0.0f};
+		BeginRenderPass(@"GT4 bloom prefilter", m_gt4_bloom[0], MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+		[m_current_render.encoder setFragmentBytes:prefilter length:sizeof(prefilter) atIndex:GSMTLBufferIndexUniforms];
+		RenderCopy(m_current, m_gt4_bloom_prefilter_pipeline, GSVector4i(0, 0, m_gt4_bloom[0]->GetWidth(), m_gt4_bloom[0]->GetHeight()));
+		for (int level = 1; level < levels; level++)
+		{
+			BeginRenderPass(@"GT4 bloom down", m_gt4_bloom[level], MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+			RenderCopy(m_gt4_bloom[level - 1], m_gt4_bloom_down_pipeline,
+				GSVector4i(0, 0, m_gt4_bloom[level]->GetWidth(), m_gt4_bloom[level]->GetHeight()));
+		}
+		for (int level = levels - 1; level > 0; level--)
+		{
+			BeginRenderPass(@"GT4 bloom up", m_gt4_bloom[level - 1], MTLLoadActionLoad, nullptr, MTLLoadActionDontCare);
+			RenderCopy(m_gt4_bloom[level], m_gt4_bloom_up_pipeline,
+				GSVector4i(0, 0, m_gt4_bloom[level - 1]->GetWidth(), m_gt4_bloom[level - 1]->GetHeight()));
+		}
+	}
+	GSTexture*& target = (m_current == m_target_tmp) ? m_merge : m_target_tmp;
+	if (!ResizeRenderTarget(&target, width, height, false, false))
+		return;
+	// The bloom sums every level of the chain: its strength is shared between them (4 makes 100% a strong glow).
+	const float look_constants[4] = {levels ? 4.0f * look.bloom / static_cast<float>(levels) : 0.0f, look.film ? 1.0f : 0.0f,
+		0.15f, static_cast<float>(width) / static_cast<float>(height)};
+	BeginRenderPass(@"GT4 look", target, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+	[m_current_render.encoder setFragmentBytes:look_constants length:sizeof(look_constants) atIndex:GSMTLBufferIndexUniforms];
+	MRESetTexture(levels ? m_gt4_bloom[0] : m_current, GSMTLTextureIndexTex);
+	RenderCopy(m_current, m_gt4_look_pipeline, GSVector4i(0, 0, width, height));
+	m_current = target;
+}}
+
 // GT4Recomp fork (macOS port): MetalFX spatial upscaling (macOS 13 or later) of the picture to its display rectangle
 // ([GT4GS] MetalFX). It only enlarges, from the texture's origin, so a picture that is not smaller than the rectangle
 // on both axes, or that starts elsewhere, is presented as before.
@@ -1359,6 +1453,41 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	m_colclip_resolve_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_colclip_resolve"), @"ColorClip Resolve");
 	m_fxaa_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_fxaa"), @"fxaa");
 	m_shadeboost_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_shadeboost"), @"shadeboost");
+	// GT4Recomp fork (macOS port): bloom levels in RGBA16Float, the upsample adding to its target.
+	m_gt4_look_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_gt4_look"), @"GT4 look");
+	m_gt4_smaa_edges_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_smaa_edges"), @"SMAA edges");
+	m_gt4_smaa_weights_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_smaa_weights"), @"SMAA weights");
+	m_gt4_smaa_blend_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_smaa_blend"), @"SMAA blend");
+	{
+		MTLTextureDescriptor* area = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG8Unorm
+			width:AREATEX_WIDTH height:AREATEX_HEIGHT mipmapped:NO];
+		[area setUsage:MTLTextureUsageShaderRead];
+		m_gt4_smaa_area = MRCTransfer([m_dev.dev newTextureWithDescriptor:area]);
+		[m_gt4_smaa_area replaceRegion:MTLRegionMake2D(0, 0, AREATEX_WIDTH, AREATEX_HEIGHT) mipmapLevel:0
+			withBytes:areaTexBytes bytesPerRow:AREATEX_PITCH];
+		[m_gt4_smaa_area setLabel:@"SMAA AreaTex"];
+		MTLTextureDescriptor* search = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
+			width:SEARCHTEX_WIDTH height:SEARCHTEX_HEIGHT mipmapped:NO];
+		[search setUsage:MTLTextureUsageShaderRead];
+		m_gt4_smaa_search = MRCTransfer([m_dev.dev newTextureWithDescriptor:search]);
+		[m_gt4_smaa_search replaceRegion:MTLRegionMake2D(0, 0, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT) mipmapLevel:0
+			withBytes:searchTexBytes bytesPerRow:SEARCHTEX_PITCH];
+		[m_gt4_smaa_search setLabel:@"SMAA SearchTex"];
+	}
+	{
+		auto bloom_desc = [[MTLRenderPipelineDescriptor new] autorelease];
+		bloom_desc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::ColorHDR);
+		m_gt4_bloom_prefilter_pipeline = MakePipeline(bloom_desc, fs_triangle, LoadShader(@"ps_gt4_bloom_prefilter"), @"GT4 bloom prefilter");
+		m_gt4_bloom_down_pipeline = MakePipeline(bloom_desc, fs_triangle, LoadShader(@"ps_gt4_bloom_down"), @"GT4 bloom down");
+		bloom_desc.colorAttachments[0].blendingEnabled = YES;
+		bloom_desc.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
+		bloom_desc.colorAttachments[0].alphaBlendOperation = MTLBlendOperationAdd;
+		bloom_desc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+		bloom_desc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOne;
+		bloom_desc.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+		bloom_desc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorZero;
+		m_gt4_bloom_up_pipeline = MakePipeline(bloom_desc, fs_triangle, LoadShader(@"ps_gt4_bloom_up"), @"GT4 bloom up");
+	}
 	m_clut_pipeline[0] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_convert_clut_4"), @"4-bit CLUT Update");
 	m_clut_pipeline[1] = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_convert_clut_8"), @"8-bit CLUT Update");
 	pdesc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::ColorClip);
@@ -1483,6 +1612,15 @@ void GSDeviceMTL::Destroy()
 	GSDeviceMTL::DestroySurface();
 	delete m_metalfx_output;
 	m_metalfx_output = nullptr;
+	for (GSTexture*& level : m_gt4_bloom)
+	{
+		delete level;
+		level = nullptr;
+	}
+	delete m_gt4_smaa_edges;
+	m_gt4_smaa_edges = nullptr;
+	delete m_gt4_smaa_weights;
+	m_gt4_smaa_weights = nullptr;
 	m_metalfx_scaler = nullptr;
 	m_queue = nullptr;
 	m_dev.Reset();

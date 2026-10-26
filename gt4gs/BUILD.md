@@ -214,7 +214,7 @@ the owner's in-game test comes first).
 ## macOS arm64 (branch gt4gs/macos)
 
 `gt4-gs` for the macOS port of GT4Recomp (github.com/dgadacha/gt4-mac, from commit `86fb754`, HDR and MetalFX from
-`8e2021c`; its `docs/BUILD-MACOS.md` covers the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro
+`8e2021c`, SMAA, bloom and film look from `16fd5c6`; its `docs/BUILD-MACOS.md` covers the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro
 (macOS 26.6, Xcode 26.2). Not released: build it from the branch.
 
 ```
@@ -259,11 +259,23 @@ Changes for macOS:
   before CAS) enlarges the picture to its display rectangle with the MetalFX spatial scaler (macOS 13 or later, weak
   linked) when it is smaller on both axes and starts at the texture's origin; otherwise the picture is presented as
   before.
+- Bloom and film look (`[GT4GS] Bloom`, percent strength, and `FilmLook`, read again by CONTROL reload_config):
+  `GSDeviceMTL::ApplyGT4Look` (a `GSDevice` virtual, called by `GSRenderer::Merge` after shade boost and FXAA, so frame
+  dumps include them) with the shaders of `gt4look.metal`. Bloom: the light above a soft threshold (linear 0.5, knee
+  0.25) goes down six half-size RGBA16Float levels (13-tap downsample) and back up (tent upsample, added to the larger
+  level), then is screen-blended over the picture. Film look: an S-curve on the display values, cool shadows and warm
+  highlights, a light vignette.
+- SMAA (`[GT4GS] SMAA`, also read again by CONTROL reload_config): SMAA 1x before the bloom and film look, in
+  `ApplyGT4Look`. `gt4smaa.metal` is a Metal port of the reference `SMAA.hlsl` (github.com/iryoku/smaa, MIT; "High"
+  preset: luma edges, diagonal and corner detection), with the reference lookup textures in `3rdparty/smaa` (uploaded
+  as RG8 and R8 Metal textures when the device is created).
 
 Checked: a 6,000-frame capture of the macOS game (menus, movie, Arcade race on the Nordschleife) replays at 1x, 3x, 4x
 and 6x (race frames: about 2 ms per frame at 1x, 7.4 ms at 6x); in live mode the picture shows in the game window,
 follows window and fullscreen changes, and 6x holds 60 FPS in a 1920x1080 window. HDR and MetalFX, live in the game
 window: 2x with MetalFX in a 1920x1080 window holds 60 FPS (4.3 to 6.2 ms of GPU time per race frame); with HDR on, the
 picture keeps its colours (window captures are SDR). The screen's EDR headroom rises only while the picture is visible;
-a two-process test of the same layer setup raised it to 5.33 (M3 Pro, potential 16). Known: the 480i menus leave a
-black band at the bottom of the picture.
+a two-process test of the same layer setup raised it to 5.33 (M3 Pro, potential 16). Bloom at 70% with the film look
+adds about 1.4 ms per race frame at 5x in the replay (6.1 to 6.4 ms against 4.7 to 5.0 ms), SMAA about 0.6 ms (5.3 to
+5.6 ms); SMAA changes the strong edges only (6% of the pixels of a race frame at 1x, against 35% for FXAA). Known: the 480i menus leave
+a black band at the bottom of the picture.

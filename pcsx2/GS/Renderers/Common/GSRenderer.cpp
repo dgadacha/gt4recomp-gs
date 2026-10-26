@@ -251,6 +251,9 @@ bool GSRenderer::Merge(int field)
 	if (GSConfig.FXAA)
 		g_gs_device->FXAA();
 
+	// GT4Recomp fork (macOS port): [GT4GS] SMAA, Bloom and FilmLook.
+	g_gs_device->ApplyGT4Look();
+
 	// Sharpens biinear at lower resolutions, almost nearest but with more uniform pixels.
 	if (GSConfig.LinearPresent == GSPostBilinearMode::BilinearSharp && (g_gs_device->GetWindowWidth() > fs.x || g_gs_device->GetWindowHeight() > fs.y))
 	{

@@ -275,6 +275,22 @@ public:
 	GSTexture* m_metalfx_output = nullptr;
 	bool m_metalfx_refused_logged = false;
 
+	// GT4Recomp fork (macOS port): bloom and film look (ApplyGT4Look, gt4look.metal).
+	static constexpr int GT4_BLOOM_LEVELS = 6;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_bloom_prefilter_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_bloom_down_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_bloom_up_pipeline; ///< adds to the target
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_look_pipeline;
+	GSTexture* m_gt4_bloom[GT4_BLOOM_LEVELS] = {}; ///< half, quarter... of the internal resolution, RGBA16Float
+	// SMAA 1x (gt4smaa.metal): the edges and the blending weights at the internal resolution, and the lookup textures.
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_smaa_edges_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_smaa_weights_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_smaa_blend_pipeline;
+	MRCOwned<id<MTLTexture>> m_gt4_smaa_area; ///< 3rdparty/smaa/AreaTex.h, RG8 160x560
+	MRCOwned<id<MTLTexture>> m_gt4_smaa_search; ///< 3rdparty/smaa/SearchTex.h, R8 64x16
+	GSTexture* m_gt4_smaa_edges = nullptr;
+	GSTexture* m_gt4_smaa_weights = nullptr;
+
 	id<MTLRenderPipelineState> GetConvertPipeline(ShaderConvertSelector shader) const
 	{
 		return m_convert_pipeline[shader.Index()];
@@ -408,6 +424,7 @@ public:
 
 	bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) override;
 	bool UpscaleToDisplay(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect) override;
+	void ApplyGT4Look() override;
 	/// GT4Recomp fork (macOS port): the layer's pixel format, colour space and dynamic range for HDR (with this
 	/// highlight peak) or SDR output.
 	void ConfigureLayerDynamicRange(bool hdr, float peak);

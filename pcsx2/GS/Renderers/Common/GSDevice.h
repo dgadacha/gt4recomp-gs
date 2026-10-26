@@ -1716,6 +1716,10 @@ public:
 		return false;
 	}
 
+	// GT4Recomp fork (macOS port): SMAA, bloom and film look of the merged picture, after shade boost and FXAA
+	// (GSGT4Presentation::smaa, bloom and film). Only the Metal device has them.
+	virtual void ApplyGT4Look() {}
+
 	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);
 
 	void AgePool();

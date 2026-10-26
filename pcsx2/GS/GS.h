@@ -97,13 +97,16 @@ bool GSIsHardwareRenderer();
 void GSSetDeferredSwapChainAcquire(bool deferred);
 bool GSGetDeferredSwapChainAcquire();
 
-// GT4Recomp fork (macOS port): presentation options of gt4-gs, from [GT4GS] HDR, HDRPeak and MetalFX of its --config
-// (read again by CONTROL reload_config). Used by the Metal device only.
+// GT4Recomp fork (macOS port): presentation options of gt4-gs, from [GT4GS] HDR, HDRPeak, MetalFX, Bloom, FilmLook and
+// SMAA of its --config (read again by CONTROL reload_config). Used by the Metal device only.
 struct GSGT4Presentation
 {
 	bool hdr = false; // extended dynamic range output with the picture's highlights expanded (EDR displays)
 	float hdr_peak = 3.0f; // brightest highlight, in multiples of SDR white
 	bool metalfx = false; // MetalFX spatial upscaling to the picture's display size when it is larger
+	float bloom = 0.0f; // strength of the glow around the picture's bright parts, 0 (off) to 1
+	bool film = false; // film look: S-curve, cool shadows and warm highlights, light vignette
+	bool smaa = false; // SMAA 1x antialiasing of the merged picture
 };
 void GSSetGT4Presentation(const GSGT4Presentation& presentation);
 GSGT4Presentation GSGetGT4Presentation();
