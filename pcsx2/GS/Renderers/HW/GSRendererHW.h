@@ -325,6 +325,17 @@ private:
 
 	GSTextureCache::Target* m_last_rt;
 
+	// GT4Recomp fork (macOS port): the 3D scene drawn since the last contact shadows (GT4ContactShadows).
+	u32 m_gt4_scene_fbp = 0; ///< colour target block
+	u32 m_gt4_scene_zbp = 0; ///< depth target block
+	u32 m_gt4_scene_fbw = 0;
+	u32 m_gt4_scene_draws = 0; ///< draws that wrote depth there
+	GSVector4i m_gt4_scene_area = GSVector4i::zero(); ///< union of their rectangles, unscaled pixels
+	GSVector4i m_gt4_shaded_area = GSVector4i::zero(); ///< what got contact shadows this frame, unscaled pixels
+	u32 m_gt4_shadow_passes = 0; ///< contact shadows drawn since the last statistics line
+	u32 m_gt4_shadow_frames = 0;
+	void GT4ContactShadows();
+
 	GIFRegFRAME m_split_clear_start = {};
 	GIFRegZBUF m_split_clear_start_Z = {};
 	u32 m_split_clear_pages = 0; // if zero, inactive

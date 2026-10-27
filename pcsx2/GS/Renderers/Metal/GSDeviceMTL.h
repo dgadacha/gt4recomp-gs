@@ -290,6 +290,13 @@ public:
 	MRCOwned<id<MTLTexture>> m_gt4_smaa_search; ///< 3rdparty/smaa/SearchTex.h, R8 64x16
 	GSTexture* m_gt4_smaa_edges = nullptr;
 	GSTexture* m_gt4_smaa_weights = nullptr;
+	// Contact shadows (gt4ao.metal): distances and occlusion at a reduced resolution, then multiplied into the colour.
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_ao_depth_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_ao_pipeline;
+	MRCOwned<id<MTLRenderPipelineState>> m_gt4_ao_apply_pipeline;
+	GSTexture* m_gt4_ao_distance = nullptr; ///< RGBA16Float, reduced resolution
+	GSTexture* m_gt4_ao_half = nullptr; ///< RGBA16Float, reduced resolution: occlusion, distance
+	bool m_gt4_ao_refused_logged = false;
 
 	id<MTLRenderPipelineState> GetConvertPipeline(ShaderConvertSelector shader) const
 	{
@@ -425,6 +432,7 @@ public:
 	bool DoCAS(GSTexture* sTex, GSTexture* dTex, bool sharpen_only, const std::array<u32, NUM_CAS_CONSTANTS>& constants) override;
 	bool UpscaleToDisplay(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect) override;
 	void ApplyGT4Look() override;
+	bool ApplyGT4ContactShadows(GSTexture* color, GSTexture* depth, const GSVector4i& rect, float strength) override;
 	/// GT4Recomp fork (macOS port): the layer's pixel format, colour space and dynamic range for HDR (with this
 	/// highlight peak) or SDR output.
 	void ConfigureLayerDynamicRange(bool hdr, float peak);

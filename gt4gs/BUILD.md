@@ -214,7 +214,8 @@ the owner's in-game test comes first).
 ## macOS arm64 (branch gt4gs/macos)
 
 `gt4-gs` for the macOS port of GT4Recomp (github.com/dgadacha/gt4-mac, from commit `86fb754`, HDR and MetalFX from
-`8e2021c`, SMAA, bloom and film look from `16fd5c6`; its `docs/BUILD-MACOS.md` covers the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro
+`8e2021c`, SMAA, bloom and film look from `16fd5c6`, contact shadows from `e6cd745`; its `docs/BUILD-MACOS.md` covers
+the game side). Based on `gt4gs-v1.2.1`, built and tested on an M3 Pro
 (macOS 26.6, Xcode 26.2). Not released: build it from the branch.
 
 ```
@@ -269,6 +270,14 @@ Changes for macOS:
   `ApplyGT4Look`. `gt4smaa.metal` is a Metal port of the reference `SMAA.hlsl` (github.com/iryoku/smaa, MIT; "High"
   preset: luma edges, diagonal and corner detection), with the reference lookup textures in `3rdparty/smaa` (uploaded
   as RG8 and R8 Metal textures when the device is created).
+- Contact shadows (`[GT4GS] AO`, percent strength, read again by CONTROL reload_config): screen-space ambient occlusion
+  of GT4's 3D scene. The depth only exists while the game draws the scene, so `GSRendererHW::GT4ContactShadows` follows
+  the draws: a scene draw writes depth with test GEQUAL into a target at least 512 pixels wide; after 16 of them, the
+  first draw that reads the depth as a texture, draws colour over the depth's memory or copies the scene's colour
+  elsewhere has `GSDeviceMTL::ApplyGT4ContactShadows` (`gt4ao.metal`) shade the scene first, once per area and frame
+  (`GSTextureCache::FindExactTarget` finds both targets without reordering the cache). The occlusion is computed at
+  about 1,000 pixels wide (distances, then 12 spiral samples with normals from the depth), then multiplied, filtered by
+  depth, into the colour channels of the scene's target. The HUD and the game's screen effects are drawn after it.
 
 Checked: a 6,000-frame capture of the macOS game (menus, movie, Arcade race on the Nordschleife) replays at 1x, 3x, 4x
 and 6x (race frames: about 2 ms per frame at 1x, 7.4 ms at 6x); in live mode the picture shows in the game window,
@@ -277,5 +286,8 @@ window: 2x with MetalFX in a 1920x1080 window holds 60 FPS (4.3 to 6.2 ms of GPU
 picture keeps its colours (window captures are SDR). The screen's EDR headroom rises only while the picture is visible;
 a two-process test of the same layer setup raised it to 5.33 (M3 Pro, potential 16). Bloom at 70% with the film look
 adds about 1.4 ms per race frame at 5x in the replay (6.1 to 6.4 ms against 4.7 to 5.0 ms), SMAA about 0.6 ms (5.3 to
-5.6 ms); SMAA changes the strong edges only (6% of the pixels of a race frame at 1x, against 35% for FXAA). Known: the 480i menus leave
+5.6 ms); SMAA changes the strong edges only (6% of the pixels of a race frame at 1x, against 35% for FXAA). Medium
+contact shadows add about 1.3 ms (6.0 to 6.4 ms), drawn once in each of the 600 race frames of every 10 seconds; checked
+with and without on the Nurburgring, New York, a night city course, a dirt course, an original circuit and the car
+selection's 3D car (0.6 to 5% darker on average, the most where wire fences stand in front of walls). Known: the 480i menus leave
 a black band at the bottom of the picture.

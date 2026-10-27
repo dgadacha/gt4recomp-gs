@@ -553,6 +553,8 @@ public:
 	/// Looks up a target in the cache, and only returns it if the BP/BW match exactly.
 	Target* GetExactTarget(u32 BP, u32 BW, int type, u32 end_bp);
 	Target* GetTargetWithSharedBits(u32 BP, u32 PSM) const;
+	/// GT4Recomp fork (macOS port): the target at exactly BP with width BW, without moving it in the cache's order.
+	Target* FindExactTarget(u32 BP, u32 BW, int type) const;
 	Target* FindOverlappingTarget(GSTextureCache::Target* target) const;
 	Target* FindOverlappingTarget(u32 BP, u32 end_bp) const;
 	Target* FindOverlappingTarget(u32 BP, u32 BW, u32 PSM, GSVector4i rc) const;

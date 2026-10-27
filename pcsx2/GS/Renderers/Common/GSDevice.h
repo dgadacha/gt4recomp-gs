@@ -1720,6 +1720,14 @@ public:
 	// (GSGT4Presentation::smaa, bloom and film). Only the Metal device has them.
 	virtual void ApplyGT4Look() {}
 
+	// GT4Recomp fork (macOS port): darkens the creases of a 3D scene in `color` from its `depth` (contact shadows,
+	// GSGT4Presentation::ao; GSRendererHW::GT4ContactShadows), within `rect`, in pixels of both textures. Only the Metal
+	// device has them; false when nothing was drawn.
+	virtual bool ApplyGT4ContactShadows(GSTexture* color, GSTexture* depth, const GSVector4i& rect, float strength)
+	{
+		return false;
+	}
+
 	bool ResizeRenderTarget(GSTexture** t, int w, int h, bool preserve_contents, bool recycle);
 
 	void AgePool();

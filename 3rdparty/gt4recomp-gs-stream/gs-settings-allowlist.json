@@ -510,6 +510,13 @@
     },
     {
       "section": "GT4GS",
+      "key": "AO",
+      "type": "int",
+      "min": 0,
+      "max": 200
+    },
+    {
+      "section": "GT4GS",
       "key": "Bloom",
       "type": "int",
       "min": 0,

@@ -864,8 +864,8 @@ static bool LoadAllowedSettings(MemorySettingsInterface& ini)
 	return true;
 }
 
-// macOS port: [GT4GS] HDR, HDRPeak (percent of SDR white), MetalFX, Bloom (percent strength), FilmLook and SMAA, for the
-// Metal device (GSGT4Presentation).
+// macOS port: [GT4GS] HDR, HDRPeak (percent of SDR white), MetalFX, Bloom (percent strength), FilmLook, SMAA and AO
+// (percent strength of the contact shadows), for the Metal device (GSGT4Presentation).
 static void ApplyGT4Presentation(const SettingsInterface& ini)
 {
 	GSGT4Presentation presentation;
@@ -875,10 +875,12 @@ static void ApplyGT4Presentation(const SettingsInterface& ini)
 	presentation.bloom = static_cast<float>(std::clamp(ini.GetIntValue("GT4GS", "Bloom", 0), 0, 100)) / 100.0f;
 	presentation.film = ini.GetBoolValue("GT4GS", "FilmLook", false);
 	presentation.smaa = ini.GetBoolValue("GT4GS", "SMAA", false);
+	presentation.ao = static_cast<float>(std::clamp(ini.GetIntValue("GT4GS", "AO", 0), 0, 200)) / 100.0f;
 	GSSetGT4Presentation(presentation);
-	Console.WriteLnFmt("gt4-gs: HDR {} (peak x{:.2f}), MetalFX {}, SMAA {}, bloom {:.0f}%, film look {}",
+	Console.WriteLnFmt("gt4-gs: HDR {} (peak x{:.2f}), MetalFX {}, SMAA {}, bloom {:.0f}%, film look {}, contact shadows {:.0f}%",
 		presentation.hdr ? "on" : "off", presentation.hdr_peak, presentation.metalfx ? "on" : "off",
-		presentation.smaa ? "on" : "off", presentation.bloom * 100.0f, presentation.film ? "on" : "off");
+		presentation.smaa ? "on" : "off", presentation.bloom * 100.0f, presentation.film ? "on" : "off",
+		presentation.ao * 100.0f);
 }
 
 bool GSRunner::ApplyGT4Config()

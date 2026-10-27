@@ -97,6 +97,15 @@ void GSRendererHW::UpdateSettings(const Pcsx2Config::GSOptions& old_config)
 
 void GSRendererHW::VSync(u32 field, bool registers_written, bool idle_frame)
 {
+	m_gt4_scene_draws = 0; // GT4Recomp fork: contact shadows start over each frame
+	m_gt4_shaded_area = GSVector4i::zero();
+	if (GSGetGT4Presentation().ao > 0.0f && ++m_gt4_shadow_frames == 600)
+	{
+		Console.WriteLnFmt("gt4-gs: contact shadows drawn {} times in the last 600 frames", m_gt4_shadow_passes);
+		m_gt4_shadow_frames = 0;
+		m_gt4_shadow_passes = 0;
+	}
+
 	if (GSConfig.LoadTextureReplacements)
 		GSTextureReplacements::ProcessAsyncLoadedTextures();
 
@@ -2756,6 +2765,78 @@ void GSRendererHW::RoundSpriteOffset()
 	}
 }
 
+// GT4Recomp fork (macOS port): contact shadows ([GT4GS] AO). GT4 draws its 3D scene into a screen-wide colour target
+// with a depth target (test GEQUAL, depth written); then it copies the scene's colour elsewhere for its screen effects
+// and HUD, in some frames after reading the depth as a texture and reusing its memory as a colour buffer (Nurburgring race
+// replay, frames 3600 and 5400; New York, where the depth alternates between two buffers and is read every other frame).
+// Just before the first of those draws, after at least 16 scene draws, the device darkens the scene's creases from the
+// depth, over the area the scene's draws covered, once per area and frame. Reflection maps and other narrow targets
+// (under 512 pixels wide) are not scenes. Needs proper testing on every kind of scene; logged once per pair of buffers.
+void GSRendererHW::GT4ContactShadows()
+{
+	const float strength = GSGetGT4Presentation().ao;
+	if (strength <= 0.0f)
+	{
+		m_gt4_scene_draws = 0;
+		return;
+	}
+	const u32 fbp = m_cached_ctx.FRAME.Block(), zbp = m_cached_ctx.ZBUF.Block(), fbw = m_cached_ctx.FRAME.FBW;
+	const bool scene_draw = m_cached_ctx.TEST.ZTE && m_cached_ctx.TEST.ZTST >= ZTST_GEQUAL && !m_cached_ctx.ZBUF.ZMSK &&
+	                        fbw >= 8 && fbp != zbp && !GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].depth;
+	if (scene_draw)
+	{
+		const GSVector4i rect = GSVector4i((m_vt.m_min.p.upld(m_vt.m_max.p) + GSVector4::cxpr(0.4f)).round<Round_NearestInt>())
+		                            .rintersect(m_context->scissor.in);
+		if (m_gt4_scene_draws == 0 || fbp != m_gt4_scene_fbp || zbp != m_gt4_scene_zbp || fbw != m_gt4_scene_fbw)
+		{
+			m_gt4_scene_fbp = fbp;
+			m_gt4_scene_zbp = zbp;
+			m_gt4_scene_fbw = fbw;
+			m_gt4_scene_draws = 0;
+			m_gt4_scene_area = rect;
+		}
+		else if (!rect.rempty())
+			m_gt4_scene_area = m_gt4_scene_area.runion(rect);
+		m_gt4_scene_draws++;
+		return;
+	}
+	if (m_gt4_scene_draws < 16)
+		return;
+	const bool reads_depth = PRIM->TME && m_cached_ctx.TEX0.TBP0 == m_gt4_scene_zbp && GSLocalMemory::m_psm[m_cached_ctx.TEX0.PSM].depth;
+	const bool draws_over_depth = fbp == m_gt4_scene_zbp && !GSLocalMemory::m_psm[m_cached_ctx.FRAME.PSM].depth;
+	const bool copies_scene = PRIM->TME && m_cached_ctx.TEX0.TBP0 == m_gt4_scene_fbp && fbp != m_gt4_scene_fbp;
+	if (!reads_depth && !draws_over_depth && !copies_scene)
+		return;
+	m_gt4_scene_draws = 0;
+	const GSVector4i already = m_gt4_shaded_area.rintersect(m_gt4_scene_area);
+	if (!already.rempty() && already.width() * already.height() * 2 > m_gt4_scene_area.width() * m_gt4_scene_area.height())
+		return; // most of it has its shadows already
+	m_gt4_shaded_area = m_gt4_shaded_area.rempty() ? m_gt4_scene_area : m_gt4_shaded_area.runion(m_gt4_scene_area);
+	GSTextureCache::Target* rt = g_texture_cache->FindExactTarget(m_gt4_scene_fbp, m_gt4_scene_fbw, GSTextureCache::RenderTarget);
+	GSTextureCache::Target* ds = g_texture_cache->FindExactTarget(m_gt4_scene_zbp, m_gt4_scene_fbw, GSTextureCache::DepthStencil);
+	// One line per pair of buffers (GT4 alternates two depth buffers in some scenes).
+	static std::vector<u32> s_logged;
+	const u32 pair = (m_gt4_scene_fbp << 16) ^ m_gt4_scene_zbp;
+	const bool log = std::find(s_logged.begin(), s_logged.end(), pair) == s_logged.end();
+	if (log)
+		s_logged.push_back(pair);
+	if (!rt || !ds || !rt->m_texture || !ds->m_texture || rt->GetScale() != ds->GetScale())
+	{
+		if (log)
+			Console.WarningFmt("gt4-gs: contact shadows skipped for the scene at {:x} (depth {:x}): no matching targets",
+				m_gt4_scene_fbp, m_gt4_scene_zbp);
+		return;
+	}
+	const GSVector4i area = GSVector4i(GSVector4(m_gt4_scene_area) * GSVector4(rt->GetScale()))
+	                            .rintersect(GSVector4i::loadh(rt->m_texture->GetSize()))
+	                            .rintersect(GSVector4i::loadh(ds->m_texture->GetSize()));
+	const bool drawn = !area.rempty() && g_gs_device->ApplyGT4ContactShadows(rt->m_texture, ds->m_texture, area, strength);
+	m_gt4_shadow_passes += drawn;
+	if (log)
+		Console.WriteLnFmt("gt4-gs: contact shadows {} for the scene at {:x} (depth {:x}), area {},{} {}x{}, before draw {}",
+			drawn ? "drawn" : "not drawn", m_gt4_scene_fbp, m_gt4_scene_zbp, area.x, area.y, area.width(), area.height(), s_n);
+}
+
 void GSRendererHW::Draw()
 {
 	static u32 num_skipped_channel_shuffle_draws = 0;
@@ -2893,6 +2974,8 @@ void GSRendererHW::Draw()
 	m_full_screen_shuffle = false;
 	m_channel_shuffle_finish = false;
 	m_channel_shuffle_src_valid = GSVector4i::zero();
+
+	GT4ContactShadows();
 
 	GL_PUSH("HW: Draw %lld (Context %u)", s_n, PRIM->CTXT);
 	GL_INS("HW: FLUSH REASON: %s%s", GetFlushReasonString(m_state_flush_reason),

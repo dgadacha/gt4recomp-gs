@@ -670,6 +670,7 @@ set(pcsx2GSMetalShaders
 	GS/Renderers/Metal/fxaa.metal
 	GS/Renderers/Metal/gt4look.metal
 	GS/Renderers/Metal/gt4smaa.metal
+	GS/Renderers/Metal/gt4ao.metal
 )
 
 if(WIN32)

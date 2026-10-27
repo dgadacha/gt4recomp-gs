@@ -848,6 +848,58 @@ void GSDeviceMTL::ApplyGT4Look()
 	m_current = target;
 }}
 
+// GT4Recomp fork (macOS port): contact shadows of a 3D scene (gt4ao.metal; GSRendererHW::GT4ContactShadows decides
+// when). The occlusion is computed at a reduced resolution (the scene's width divided by a whole factor to 1,000 pixels
+// or less), then filtered and multiplied into `color` over `rect`. The field of view is assumed: 70 degrees horizontally
+// on a 16:9 picture (GT4Recomp forces widescreen); the shadows depend little on it. The radius (0.2 view units, about
+// 0.5 m), the angle bias (0.2) and the strength scale (2 at 100%) were tuned on the Nurburgring race replay and New
+// York: a larger radius or a smaller bias darkened the cars' bodies and the walls behind wire fences (New York 15% darker
+// on average at 0.3 and 0.1, 3 to 5% at these values).
+bool GSDeviceMTL::ApplyGT4ContactShadows(GSTexture* color, GSTexture* depth, const GSVector4i& rect, float strength)
+{ @autoreleasepool {
+	if (color->GetFormat() != GSTexture::Format::Color || depth->GetFormat() != GSTexture::Format::DepthStencil)
+	{
+		if (!m_gt4_ao_refused_logged)
+			Console.WarningFmt("gt4-gs: contact shadows need an RGBA8 scene and a depth target (formats {} and {})",
+				static_cast<int>(color->GetFormat()), static_cast<int>(depth->GetFormat()));
+		m_gt4_ao_refused_logged = true;
+		return false;
+	}
+	const int factor = std::max(1, (rect.width() + 999) / 1000);
+	const int reduced_width = (rect.z + factor - 1) / factor, reduced_height = (rect.w + factor - 1) / factor;
+	for (GSTexture** target : {&m_gt4_ao_distance, &m_gt4_ao_half})
+	{
+		if (!*target || (*target)->GetWidth() != reduced_width || (*target)->GetHeight() != reduced_height)
+		{
+			delete *target;
+			*target = CreateRenderTarget(reduced_width, reduced_height, GSTexture::Format::ColorHDR, false, false);
+			if (!*target)
+				return false;
+		}
+	}
+	FlushClears(depth);
+	const float tan_x = std::tan(70.0f * static_cast<float>(M_PI) / 360.0f);
+	const float scale = static_cast<float>(rect.width()) / 640.0f;
+	constexpr float radius = 0.2f, strength_scale = 2.0f, bias = 0.2f;
+	const float uniforms[16] = {
+		tan_x, tan_x * 9.0f / 16.0f, radius, strength_scale * strength,
+		static_cast<float>(rect.x), static_cast<float>(rect.y), static_cast<float>(rect.width()), static_cast<float>(rect.height()),
+		static_cast<float>(factor), 48.0f * scale / static_cast<float>(factor), static_cast<float>(depth->GetWidth()),
+		static_cast<float>(depth->GetHeight()), bias, 0.0f, 0.0f, 0.0f};
+	const GSVector4i reduced(0, 0, reduced_width, reduced_height);
+	BeginRenderPass(@"GT4 contact shadows depth", m_gt4_ao_distance, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+	[m_current_render.encoder setFragmentBytes:uniforms length:sizeof(uniforms) atIndex:GSMTLBufferIndexUniforms];
+	RenderCopy(depth, m_gt4_ao_depth_pipeline, reduced);
+	BeginRenderPass(@"GT4 contact shadows", m_gt4_ao_half, MTLLoadActionDontCare, nullptr, MTLLoadActionDontCare);
+	[m_current_render.encoder setFragmentBytes:uniforms length:sizeof(uniforms) atIndex:GSMTLBufferIndexUniforms];
+	RenderCopy(m_gt4_ao_distance, m_gt4_ao_pipeline, reduced);
+	BeginRenderPass(@"GT4 contact shadows apply", color, MTLLoadActionLoad, nullptr, MTLLoadActionDontCare);
+	[m_current_render.encoder setFragmentBytes:uniforms length:sizeof(uniforms) atIndex:GSMTLBufferIndexUniforms];
+	MRESetTexture(m_gt4_ao_half, GSMTLTextureIndexTex);
+	RenderCopy(depth, m_gt4_ao_apply_pipeline, rect);
+	return true;
+}}
+
 // GT4Recomp fork (macOS port): MetalFX spatial upscaling (macOS 13 or later) of the picture to its display rectangle
 // ([GT4GS] MetalFX). It only enlarges, from the texture's origin, so a picture that is not smaller than the rectangle
 // on both axes, or that starts elsewhere, is presented as before.
@@ -1459,6 +1511,26 @@ bool GSDeviceMTL::Create(GSVSyncMode vsync_mode, bool allow_present_throttle)
 	m_gt4_smaa_weights_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_smaa_weights"), @"SMAA weights");
 	m_gt4_smaa_blend_pipeline = MakePipeline(pdesc, fs_triangle, LoadShader(@"ps_smaa_blend"), @"SMAA blend");
 	{
+		auto ao_desc = [[MTLRenderPipelineDescriptor new] autorelease];
+		ao_desc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::ColorHDR);
+		m_gt4_ao_depth_pipeline = MakePipeline(ao_desc, fs_triangle, LoadShader(@"ps_gt4_ao_depth"), @"GT4 contact shadows depth");
+		m_gt4_ao_pipeline = MakePipeline(ao_desc, fs_triangle, LoadShader(@"ps_gt4_ao"), @"GT4 contact shadows");
+	}
+	{
+		// The occlusion multiplies the scene's colour channels; its alpha stays the game's.
+		auto apply_desc = [[MTLRenderPipelineDescriptor new] autorelease];
+		apply_desc.colorAttachments[0].pixelFormat = ConvertPixelFormat(GSTexture::Format::Color);
+		apply_desc.colorAttachments[0].blendingEnabled = YES;
+		apply_desc.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
+		apply_desc.colorAttachments[0].alphaBlendOperation = MTLBlendOperationAdd;
+		apply_desc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorDestinationColor;
+		apply_desc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorZero;
+		apply_desc.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorZero;
+		apply_desc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+		apply_desc.colorAttachments[0].writeMask = MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue;
+		m_gt4_ao_apply_pipeline = MakePipeline(apply_desc, fs_triangle, LoadShader(@"ps_gt4_ao_apply"), @"GT4 contact shadows apply");
+	}
+	{
 		MTLTextureDescriptor* area = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG8Unorm
 			width:AREATEX_WIDTH height:AREATEX_HEIGHT mipmapped:NO];
 		[area setUsage:MTLTextureUsageShaderRead];
@@ -1621,6 +1693,10 @@ void GSDeviceMTL::Destroy()
 	m_gt4_smaa_edges = nullptr;
 	delete m_gt4_smaa_weights;
 	m_gt4_smaa_weights = nullptr;
+	delete m_gt4_ao_half;
+	m_gt4_ao_half = nullptr;
+	delete m_gt4_ao_distance;
+	m_gt4_ao_distance = nullptr;
 	m_metalfx_scaler = nullptr;
 	m_queue = nullptr;
 	m_dev.Reset();

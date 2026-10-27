@@ -5789,6 +5789,16 @@ GSTextureCache::Target* GSTextureCache::GetExactTarget(u32 BP, u32 BW, int type,
 	return nullptr;
 }
 
+GSTextureCache::Target* GSTextureCache::FindExactTarget(u32 BP, u32 BW, int type) const
+{
+	for (Target* t : m_dst[type])
+	{
+		if (t->m_TEX0.TBP0 == BP && std::max(t->m_TEX0.TBW, 1U) == BW)
+			return t;
+	}
+	return nullptr;
+}
+
 GSTextureCache::Target* GSTextureCache::GetTargetWithSharedBits(u32 BP, u32 PSM) const
 {
 	auto& rts = m_dst[GSLocalMemory::m_psm[PSM].depth ? DepthStencil : RenderTarget];
